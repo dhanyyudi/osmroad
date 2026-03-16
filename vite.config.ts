@@ -15,6 +15,9 @@ export default defineConfig({
 	esbuild: {
 		target: "esnext",
 	},
+	build: {
+		target: "esnext",
+	},
 	server: {
 		headers: {
 			"Cross-Origin-Embedder-Policy": "require-corp",
