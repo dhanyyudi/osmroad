@@ -24,17 +24,8 @@ export function addOsmixVectorProtocol() {
 			if (!match) throw new Error(`Bad @osmix/vector URL: ${req.url}`)
 			const [, osmId, zStr, xStr, yStr] = match
 			const tileIndex: Tile = [+xStr!, +yStr!, +zStr!]
-
-			// Wait briefly for remote to become available (race condition on
-			// initial load — tiles may be requested before the worker proxy
-			// singleton is assigned).
-			let remote = getOsmRemote()
-			if (!remote) {
-				await new Promise((r) => setTimeout(r, 100))
-				remote = getOsmRemote()
-			}
+			const remote = getOsmRemote()
 			if (!remote || abortController.signal.aborted) return { data: null }
-
 			const data = await remote.getVectorTile(
 				decodeURIComponent(osmId!),
 				tileIndex,
@@ -42,7 +33,7 @@ export function addOsmixVectorProtocol() {
 
 			return {
 				data: abortController.signal.aborted ? null : data,
-				cacheControl: "max-age=3600",
+				cacheControl: "no-cache",
 			}
 		},
 	)
@@ -53,4 +44,9 @@ export function removeOsmixVectorProtocol() {
 	if (!registered) return
 	maplibre.removeProtocol(VECTOR_PROTOCOL_NAME)
 	registered = false
+}
+
+// Register protocol at module load time (same pattern as merge.osmix.dev)
+if (typeof window !== "undefined") {
+	addOsmixVectorProtocol()
 }

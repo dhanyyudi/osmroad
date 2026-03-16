@@ -16,10 +16,8 @@ import { SearchHighlightLayer } from "./search-highlight-layer"
 import { GeocodingOverlay } from "./geocoding-overlay"
 import { BasemapSwitcher } from "./basemap-switcher"
 import { MapLegend } from "./map-legend"
-import {
-	addOsmixVectorProtocol,
-	removeOsmixVectorProtocol,
-} from "../../lib/osmix-vector-protocol"
+// Protocol import ensures it's registered at module load time
+import "../../lib/osmix-vector-protocol"
 
 const SNAP_RADIUS_M = 1_000
 
@@ -74,10 +72,8 @@ export function MapViewer() {
 		return opt?.url || EMPTY_STYLE
 	}, [basemapId])
 
-	useEffect(() => {
-		addOsmixVectorProtocol()
-		return () => removeOsmixVectorProtocol()
-	}, [])
+	// Protocol is registered at module load time in osmix-vector-protocol.ts
+	// (same pattern as merge.osmix.dev)
 
 	// Fly to dataset bounds when loaded + auto-open legend
 	useEffect(() => {
