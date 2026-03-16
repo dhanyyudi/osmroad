@@ -2,7 +2,7 @@ export const VECTOR_PROTOCOL_NAME = "@osmix/vector"
 export const MIN_ZOOM = 2
 export const MAX_ZOOM = 22
 export const MIN_PICKABLE_ZOOM = 10
-export const DEFAULT_ZOOM = 12
+export const DEFAULT_ZOOM = 5
 
 export const BASEMAP_DARK =
 	"https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
