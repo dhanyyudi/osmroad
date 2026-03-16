@@ -24,8 +24,17 @@ export function addOsmixVectorProtocol() {
 			if (!match) throw new Error(`Bad @osmix/vector URL: ${req.url}`)
 			const [, osmId, zStr, xStr, yStr] = match
 			const tileIndex: Tile = [+xStr!, +yStr!, +zStr!]
-			const remote = getOsmRemote()
+
+			// Wait briefly for remote to become available (race condition on
+			// initial load — tiles may be requested before the worker proxy
+			// singleton is assigned).
+			let remote = getOsmRemote()
+			if (!remote) {
+				await new Promise((r) => setTimeout(r, 100))
+				remote = getOsmRemote()
+			}
 			if (!remote || abortController.signal.aborted) return { data: null }
+
 			const data = await remote.getVectorTile(
 				decodeURIComponent(osmId!),
 				tileIndex,
