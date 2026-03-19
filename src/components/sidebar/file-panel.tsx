@@ -1,31 +1,30 @@
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { FileDropZone } from "../shared/file-drop-zone"
 import { ProgressBar } from "../shared/progress-bar"
 import { useOsmStore } from "../../stores/osm-store"
 import { useUIStore } from "../../stores/ui-store"
 import { useOsm } from "../../hooks/use-osm"
-import { FileText, MapPin, Route, GitBranch, MapPinned, Download, ExternalLink } from "lucide-react"
+import { FileText, MapPin, Route, GitBranch, MapPinned, Download, ExternalLink, Globe, Loader2 } from "lucide-react"
 
-// Sample data - uses local files from public/samples/
-const SAMPLE_FILES = [
-	{
-		name: "Monaco",
-		url: "/samples/monaco.osm.pbf",
-		description: "Dense urban network (~0.7 MB)",
-		format: "pbf" as const,
-	},
-	{
-		name: "Denpasar Center",
-		url: "/samples/denpasar_center.geojson",
-		description: "Central Denpasar roads (~2 MB)",
-		format: "geojson" as const,
-	},
-]
+// Sample data - Denpasar only
+const SAMPLE_FILE = {
+	name: "Denpasar, Bali",
+	url: "/samples/denpasar_sample.osm.pbf",
+	description: "Denpasar city roads (~3 MB)",
+}
+
+// Overpass API endpoint
+const OVERPASS_API = "https://overpass-api.de/api/interpreter"
 
 export function FilePanel() {
 	const { remote } = useOsm()
 	const { dataset, isLoading, progress, error } = useOsmStore()
 	const setActiveTab = useUIStore((s) => s.setActiveTab)
+	
+	// Overpass download state
+	const [showOverpassForm, setShowOverpassForm] = useState(false)
+	const [bboxInput, setBboxInput] = useState("")
+	const [overpassLoading, setOverpassLoading] = useState(false)
 
 	const handleFile = useCallback(
 		async (file: File) => {
@@ -50,52 +49,89 @@ export function FilePanel() {
 		[remote, setActiveTab],
 	)
 
-	const loadSample = useCallback(
-		async (sample: (typeof SAMPLE_FILES)[0]) => {
-			if (!remote) return
-			const store = useOsmStore.getState()
-			store.setLoading(true)
-			store.setError(null)
-			try {
-				// Fetch the sample file
-				const response = await fetch(sample.url)
-				if (!response.ok) {
-					throw new Error(`Failed to download: ${response.statusText}`)
-				}
-				const blob = await response.blob()
-				
-				if (sample.format === "geojson") {
-					// Load as GeoJSON
-					const file = new File([blob], `${sample.name.replace(/,\s*/g, "_").toLowerCase()}.geojson`, {
-						type: "application/geo+json",
-					})
-					const result = await remote.fromGeoJSON(file, { id: file.name })
-					store.setDataset({
-						osmId: result.id,
-						info: result,
-						fileName: file.name,
-					})
-				} else {
-					// Load as PBF
-					const file = new File([blob], `${sample.name.replace(/,\s*/g, "_").toLowerCase()}.osm.pbf`, {
-						type: "application/octet-stream",
-					})
-					const result = await remote.fromPbf(file, { id: file.name })
-					store.setDataset({
-						osmId: result.id,
-						info: result,
-						fileName: file.name,
-					})
-				}
-				store.setLoading(false)
-				store.setProgress(null)
-				setActiveTab("inspect")
-			} catch (err) {
-				store.setError(String(err))
+	const loadSample = useCallback(async () => {
+		if (!remote) return
+		const store = useOsmStore.getState()
+		store.setLoading(true)
+		store.setError(null)
+		try {
+			const response = await fetch(SAMPLE_FILE.url)
+			if (!response.ok) {
+				throw new Error(`Failed to download: ${response.statusText}`)
 			}
-		},
-		[remote, setActiveTab],
-	)
+			const blob = await response.blob()
+			const file = new File([blob], "denpasar_sample.osm.pbf", {
+				type: "application/octet-stream",
+			})
+			const result = await remote.fromPbf(file, { id: file.name })
+			store.setDataset({
+				osmId: result.id,
+				info: result,
+				fileName: file.name,
+			})
+			store.setLoading(false)
+			store.setProgress(null)
+			setActiveTab("inspect")
+		} catch (err) {
+			store.setError(String(err))
+		}
+	}, [remote, setActiveTab])
+
+	const downloadFromOverpass = useCallback(async () => {
+		if (!remote || !bboxInput.trim()) return
+		
+		setOverpassLoading(true)
+		const store = useOsmStore.getState()
+		store.setLoading(true)
+		store.setError(null)
+		try {
+			// Parse bbox: minLon,minLat,maxLon,maxLat
+			const bbox = bboxInput.trim().split(",").map(Number)
+			if (bbox.length !== 4 || bbox.some(isNaN)) {
+				throw new Error("Invalid bbox format. Use: minLon,minLat,maxLon,maxLat")
+			}
+			const [minLon, minLat, maxLon, maxLat] = bbox
+			
+			// Build Overpass QL query - roads only for efficiency
+			const query = `[bbox:${minLat},${minLon},${maxLat},${maxLon}];
+(
+  way["highway"];
+  node(w);
+);
+out meta;`
+			
+			// Fetch from Overpass API
+			const response = await fetch(OVERPASS_API, {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				body: `data=${encodeURIComponent(query)}`,
+			})
+			
+			if (!response.ok) {
+				throw new Error(`Overpass API error: ${response.statusText}`)
+			}
+			
+			const osmXml = await response.text()
+			
+			// Note: osmix doesn't support OSM XML directly, user needs to convert
+			store.setError("Downloaded OSM XML. Convert to PBF using: osmium cat file.osm -o output.pbf")
+			
+			// Auto-download the file for user
+			const blob = new Blob([osmXml], { type: "application/xml" })
+			const url = URL.createObjectURL(blob)
+			const a = document.createElement("a")
+			a.href = url
+			a.download = `roads_${minLon}_${minLat}.osm`
+			a.click()
+			URL.revokeObjectURL(url)
+			
+		} catch (err) {
+			store.setError(String(err))
+		} finally {
+			setOverpassLoading(false)
+			store.setLoading(false)
+		}
+	}, [remote, bboxInput])
 
 	return (
 		<div className="flex flex-col gap-4 p-4">
@@ -114,29 +150,93 @@ export function FilePanel() {
 					<MapPinned className="h-4 w-4 text-blue-400" />
 					<span className="text-xs font-medium text-zinc-300">Try Sample Data</span>
 				</div>
-				<div className="flex flex-col gap-2">
-					{SAMPLE_FILES.map((sample) => (
-						<button
-							key={sample.name}
-							onClick={() => loadSample(sample)}
-							disabled={isLoading || !remote}
-							className="flex items-center justify-between rounded-md bg-zinc-700/50 px-3 py-2 text-left text-xs transition-colors hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
-						>
-							<div>
-								<div className="font-medium text-zinc-200">{sample.name}</div>
-								<div className="text-zinc-500">{sample.description}</div>
-							</div>
-							<Download className="h-3.5 w-3.5 text-zinc-400" />
-						</button>
-					))}
+				<button
+					onClick={loadSample}
+					disabled={isLoading || !remote}
+					className="flex w-full items-center justify-between rounded-md bg-zinc-700/50 px-3 py-2 text-left text-xs transition-colors hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+				>
+					<div>
+						<div className="font-medium text-zinc-200">{SAMPLE_FILE.name}</div>
+						<div className="text-zinc-500">{SAMPLE_FILE.description}</div>
+					</div>
+					<Download className="h-3.5 w-3.5 text-zinc-400" />
+				</button>
+			</div>
+
+			{/* Download from OSM Section */}
+			<div className="rounded-lg bg-zinc-800/50 p-3">
+				<div className="mb-2 flex items-center gap-2">
+					<Globe className="h-4 w-4 text-green-400" />
+					<span className="text-xs font-medium text-zinc-300">Download from OSM</span>
 				</div>
+				<p className="mb-2 text-[10px] text-zinc-500">
+					Download road data directly via Overpass API
+				</p>
+				
+				{!showOverpassForm ? (
+					<button
+						onClick={() => setShowOverpassForm(true)}
+						disabled={isLoading || !remote}
+						className="w-full rounded-md bg-green-600/20 px-3 py-2 text-xs font-medium text-green-400 transition-colors hover:bg-green-600/30 disabled:opacity-50"
+					>
+						Define Area of Interest
+					</button>
+				) : (
+					<div className="space-y-2">
+						<div>
+							<label className="mb-1 block text-[10px] text-zinc-400">
+								Bounding Box (lon,lat,lon,lat)
+							</label>
+							<input
+								type="text"
+								value={bboxInput}
+								onChange={(e) => setBboxInput(e.target.value)}
+								placeholder="115.20,-8.70,115.25,-8.65"
+								className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:border-blue-500 focus:outline-none"
+							/>
+						</div>
+						<div className="flex gap-2">
+							<button
+								onClick={downloadFromOverpass}
+								disabled={overpassLoading || !bboxInput.trim()}
+								className="flex-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-50"
+							>
+								{overpassLoading ? (
+									<span className="flex items-center justify-center gap-1">
+										<Loader2 className="h-3 w-3 animate-spin" />
+										Downloading...
+									</span>
+								) : (
+									"Download Roads"
+								)}
+							</button>
+							<button
+								onClick={() => setShowOverpassForm(false)}
+								className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-600"
+							>
+								Cancel
+							</button>
+						</div>
+						<p className="text-[9px] text-zinc-500">
+							Tip: Get bbox from{" "}
+							<a
+								href="http://bboxfinder.com/"
+								target="_blank"
+								rel="noopener noreferrer"
+								className="text-blue-400 hover:underline"
+							>
+								bboxfinder.com
+							</a>
+						</p>
+					</div>
+				)}
 			</div>
 
 			{/* Help Section */}
 			{!dataset && !isLoading && (
 				<div className="rounded-lg bg-zinc-800/30 p-3 text-xs text-zinc-500">
 					<p className="mb-2">
-						<strong className="text-zinc-400">Don&apos;t have OSM data?</strong>
+						<strong className="text-zinc-400">Need more data?</strong>
 					</p>
 					<ul className="list-disc space-y-1 pl-4">
 						<li>
@@ -164,7 +264,18 @@ export function FilePanel() {
 								<ExternalLink className="h-3 w-3" />
 							</a>
 						</li>
-						<li>Or try the sample data above ☝️</li>
+						<li>
+							Or use{" "}
+							<a
+								href="http://bboxfinder.com/"
+								target="_blank"
+								rel="noopener noreferrer"
+								className="text-blue-400 hover:underline"
+							>
+								bboxfinder.com
+							</a>
+							{" "}+ Download from OSM above
+						</li>
 					</ul>
 				</div>
 			)}
