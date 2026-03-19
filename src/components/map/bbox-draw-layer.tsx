@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, useState } from "react"
 import { useMap } from "react-map-gl/maplibre"
 import { useUIStore } from "../../stores/ui-store"
 import type { MapMouseEvent } from "maplibre-gl"
@@ -17,58 +17,73 @@ export function BBoxDrawLayer() {
 	const startPointRef = useRef<{ lng: number; lat: number } | null>(null)
 	const sourceId = "bbox-draw-source"
 	const layerId = "bbox-draw-layer"
+	
+	// Track if source/layer is initialized
+	const [isInitialized, setIsInitialized] = useState(false)
 
-	// Initialize GeoJSON source and layer
+	// Initialize GeoJSON source and layer - wait for style to load
 	useEffect(() => {
 		if (!map) return
 
-		// Add source if not exists
-		if (!map.getSource(sourceId)) {
-			map.addSource(sourceId, {
-				type: "geojson",
-				data: {
-					type: "Feature",
-					geometry: { type: "Polygon", coordinates: [[]] },
-					properties: {},
-				},
-			})
+		const addSourceAndLayer = () => {
+			// Add source if not exists
+			if (!map.getSource(sourceId)) {
+				map.addSource(sourceId, {
+					type: "geojson",
+					data: {
+						type: "Feature",
+						geometry: { type: "Polygon", coordinates: [[]] },
+						properties: {},
+					},
+				})
+			}
+
+			// Add layer if not exists
+			if (!map.getLayer(layerId)) {
+				map.addLayer({
+					id: layerId,
+					type: "fill",
+					source: sourceId,
+					paint: {
+						"fill-color": "#3b82f6",
+						"fill-opacity": 0.2,
+						"fill-outline-color": "#3b82f6",
+					},
+				})
+
+				// Add outline layer
+				map.addLayer({
+					id: `${layerId}-outline`,
+					type: "line",
+					source: sourceId,
+					paint: {
+						"line-color": "#3b82f6",
+						"line-width": 2,
+						"line-dasharray": [2, 2],
+					},
+				})
+			}
+			
+			setIsInitialized(true)
 		}
 
-		// Add layer if not exists
-		if (!map.getLayer(layerId)) {
-			map.addLayer({
-				id: layerId,
-				type: "fill",
-				source: sourceId,
-				paint: {
-					"fill-color": "#3b82f6",
-					"fill-opacity": 0.2,
-					"fill-outline-color": "#3b82f6",
-				},
-			})
-
-			// Add outline layer
-			map.addLayer({
-				id: `${layerId}-outline`,
-				type: "line",
-				source: sourceId,
-				paint: {
-					"line-color": "#3b82f6",
-					"line-width": 2,
-					"line-dasharray": [2, 2],
-				},
-			})
+		// Wait for style to load before adding sources/layers
+		if (map.isStyleLoaded()) {
+			addSourceAndLayer()
+		} else {
+			map.once("style.load", addSourceAndLayer)
 		}
 
 		return () => {
-			// Cleanup handled by map unmount
+			// Cleanup - remove listeners only
+			map.off("style.load", addSourceAndLayer)
 		}
 	}, [map])
 
 	// Handle mouse events for drawing
 	const handleMouseDown = useCallback(
 		(e: MapMouseEvent) => {
-			if (!isDrawingMode || !map) return
+			if (!isDrawingMode || !map || !isInitialized) return
 
 			e.preventDefault()
 			isDrawingRef.current = true
@@ -77,12 +92,12 @@ export function BBoxDrawLayer() {
 			// Change cursor
 			map.getCanvas().style.cursor = "crosshair"
 		},
-		[isDrawingMode, map],
+		[isDrawingMode, map, isInitialized],
 	)
 
 	const handleMouseMove = useCallback(
 		(e: MapMouseEvent) => {
-			if (!isDrawingMode || !isDrawingRef.current || !map || !startPointRef.current) return
+			if (!isDrawingMode || !isDrawingRef.current || !map || !startPointRef.current || !isInitialized) return
 
 			const start = startPointRef.current
 			const current = { lng: e.lngLat.lng, lat: e.lngLat.lat }
@@ -106,12 +121,12 @@ export function BBoxDrawLayer() {
 				})
 			}
 		},
-		[isDrawingMode, map],
+		[isDrawingMode, map, isInitialized],
 	)
 
 	const handleMouseUp = useCallback(
 		(e: MapMouseEvent) => {
-			if (!isDrawingMode || !isDrawingRef.current || !map || !startPointRef.current) return
+			if (!isDrawingMode || !isDrawingRef.current || !map || !startPointRef.current || !isInitialized) return
 
 			isDrawingRef.current = false
 			const start = startPointRef.current
@@ -146,12 +161,12 @@ export function BBoxDrawLayer() {
 			map.getCanvas().style.cursor = ""
 			startPointRef.current = null
 		},
-		[isDrawingMode, map, setDrawnBbox, setDrawingMode],
+		[isDrawingMode, map, setDrawnBbox, setDrawingMode, isInitialized],
 	)
 
 	// Register event listeners when drawing mode is active
 	useEffect(() => {
-		if (!map) return
+		if (!map || !isInitialized) return
 
 		if (isDrawingMode) {
 			map.on("mousedown", handleMouseDown)
@@ -170,11 +185,11 @@ export function BBoxDrawLayer() {
 			map.off("mousemove", handleMouseMove)
 			map.off("mouseup", handleMouseUp)
 		}
-	}, [isDrawingMode, map, handleMouseDown, handleMouseMove, handleMouseUp])
+	}, [isDrawingMode, map, handleMouseDown, handleMouseMove, handleMouseUp, isInitialized])
 
 	// Clear drawing when exiting drawing mode without completing
 	useEffect(() => {
-		if (!isDrawingMode && !useUIStore.getState().drawnBbox && map) {
+		if (!isDrawingMode && !useUIStore.getState().drawnBbox && map && isInitialized) {
 			const source = map.getSource(sourceId) as maplibregl.GeoJSONSource
 			if (source) {
 				source.setData({
@@ -184,7 +199,7 @@ export function BBoxDrawLayer() {
 				})
 			}
 		}
-	}, [isDrawingMode, map])
+	}, [isDrawingMode, map, isInitialized])
 
 	return null // This is a logic-only component
 }
