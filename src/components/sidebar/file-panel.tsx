@@ -18,8 +18,9 @@ const SAMPLE_FILE = {
 // Overpass API endpoint
 const OVERPASS_API = "https://overpass-api.de/api/interpreter"
 
-// Maximum allowed area (km²) to prevent huge downloads
-const MAX_AREA_KM2 = 100
+// Maximum allowed area (km²) to prevent timeout
+const MAX_AREA_KM2 = 10
+const OVERPASS_TIMEOUT_MS = 90000 // 90 seconds
 
 export function FilePanel() {
 	const { remote } = useOsm()
@@ -109,7 +110,7 @@ export function FilePanel() {
 			useOsmStore
 				.getState()
 				.setError(
-					`Area too large (${areaKm2.toFixed(1)} km²). Max allowed: ${MAX_AREA_KM2} km². Please select a smaller area.`,
+					`Area too large (${areaKm2.toFixed(1)} km²). Max allowed: ${MAX_AREA_KM2} km². Please draw a smaller area (about 2-5 km² works best).`,
 				)
 			return
 		}
@@ -121,22 +122,29 @@ export function FilePanel() {
 		store.setError(null)
 
 		try {
-			// Build Overpass QL query - roads only for efficiency
+			// Optimized Overpass QL query - use 'out geom' for full geometry
+			// This is more efficient than 'node(w); out meta' which downloads all nodes separately
 			const query = `[bbox:${drawnBbox.minLat},${drawnBbox.minLon},${drawnBbox.maxLat},${drawnBbox.maxLon}];
-(
-  way["highway"];
-  node(w);
-);
-out meta;`
+way["highway"];
+out geom;`
 
-			// Fetch from Overpass API
+			// Fetch from Overpass API with timeout
+			const controller = new AbortController()
+			const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS)
+			
 			const response = await fetch(OVERPASS_API, {
 				method: "POST",
 				headers: { "Content-Type": "application/x-www-form-urlencoded" },
 				body: `data=${encodeURIComponent(query)}`,
+				signal: controller.signal,
 			})
+			
+			clearTimeout(timeoutId)
 
 			if (!response.ok) {
+				if (response.status === 504) {
+					throw new Error("Overpass API timeout. Area too large or too complex. Try a smaller area (2-3 km²).")
+				}
 				throw new Error(`Overpass API error: ${response.statusText}`)
 			}
 
@@ -171,7 +179,11 @@ out meta;`
 			clearDrawnBbox()
 			setActiveTab("inspect")
 		} catch (err) {
-			store.setError(String(err))
+			if (err instanceof Error && err.name === "AbortError") {
+				store.setError("Request timed out. Area may be too large or network is slow. Try a smaller area.")
+			} else {
+				store.setError(String(err))
+			}
 			setOverpassLoading(false)
 			store.setLoading(false)
 		}
@@ -217,7 +229,7 @@ out meta;`
 				{!isDrawingMode && !drawnBbox && (
 					<>
 						<p className="mb-2 text-[10px] text-zinc-500">
-							Draw a rectangle on the map to select an area
+							Draw a rectangle on the map (max {MAX_AREA_KM2} km², ~2-5 km² works best)
 						</p>
 						<button
 							onClick={startDrawingMode}
@@ -236,7 +248,7 @@ out meta;`
 							<span className="text-xs font-medium">Drawing mode active...</span>
 						</div>
 						<p className="mt-1 text-[10px] text-blue-300/70">
-							Click and drag on the map to draw a rectangle
+							Click and drag on the map. Tip: Smaller areas (~2-3 km²) load faster.
 						</p>
 						<button
 							onClick={cancelDrawing}
@@ -250,47 +262,63 @@ out meta;`
 
 				{drawnBbox && (
 					<div className="space-y-2">
-						<div className="rounded-md bg-green-500/10 p-2">
-							<div className="flex items-center gap-1.5 text-green-400">
-								<Check className="h-3.5 w-3.5" />
-								<span className="text-[10px] font-medium">Area selected</span>
-							</div>
-							<div className="mt-1 text-[10px] text-zinc-400 font-mono">
-								{formatBbox(drawnBbox)}
-							</div>
-							<div className="text-[9px] text-zinc-500">
-								Area: ~{calculateBboxAreaKm2(drawnBbox.minLon, drawnBbox.minLat, drawnBbox.maxLon, drawnBbox.maxLat).toFixed(1)} km²
-							</div>
-						</div>
+						{(() => {
+							const areaKm2 = calculateBboxAreaKm2(drawnBbox.minLon, drawnBbox.minLat, drawnBbox.maxLon, drawnBbox.maxLat)
+							const isTooLarge = areaKm2 > MAX_AREA_KM2
+							return (
+								<div className={`rounded-md p-2 ${isTooLarge ? 'bg-red-500/10' : 'bg-green-500/10'}`}>
+									<div className={`flex items-center gap-1.5 ${isTooLarge ? 'text-red-400' : 'text-green-400'}`}>
+										{isTooLarge ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+										<span className="text-[10px] font-medium">
+											{isTooLarge ? 'Area too large!' : 'Area selected'}
+										</span>
+									</div>
+									<div className="mt-1 text-[10px] text-zinc-400 font-mono">
+										{formatBbox(drawnBbox)}
+									</div>
+									<div className={`text-[9px] ${isTooLarge ? 'text-red-400' : 'text-zinc-500'}`}>
+										Area: ~{areaKm2.toFixed(1)} km² {isTooLarge && `(max ${MAX_AREA_KM2} km²)`}
+									</div>
+								</div>
+							)
+						})()}
 						
-						<div className="flex gap-2">
-							<button
-								onClick={downloadFromOverpass}
-								disabled={overpassLoading}
-								className="flex-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-50"
-							>
-								{overpassLoading ? (
-									<span className="flex items-center justify-center gap-1">
-										<Loader2 className="h-3 w-3 animate-spin" />
-										Loading...
-									</span>
-								) : downloadSuccess ? (
-									<span className="flex items-center justify-center gap-1">
-										<Check className="h-3 w-3" />
-										Loaded!
-									</span>
-								) : (
-									"Download & Load"
-								)}
-							</button>
-							<button
-								onClick={cancelDrawing}
-								disabled={overpassLoading}
-								className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-600 disabled:opacity-50"
-							>
-								Redraw
-							</button>
-						</div>
+						{(() => {
+							const areaKm2 = calculateBboxAreaKm2(drawnBbox.minLon, drawnBbox.minLat, drawnBbox.maxLon, drawnBbox.maxLat)
+							const isTooLarge = areaKm2 > MAX_AREA_KM2
+							return (
+								<div className="flex gap-2">
+									<button
+										onClick={downloadFromOverpass}
+										disabled={overpassLoading || isTooLarge}
+										className="flex-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-50"
+									>
+										{overpassLoading ? (
+											<span className="flex items-center justify-center gap-1">
+												<Loader2 className="h-3 w-3 animate-spin" />
+												Loading...
+											</span>
+										) : downloadSuccess ? (
+											<span className="flex items-center justify-center gap-1">
+												<Check className="h-3 w-3" />
+												Loaded!
+											</span>
+										) : isTooLarge ? (
+											"Area Too Large"
+										) : (
+											"Download & Load"
+										)}
+									</button>
+									<button
+										onClick={cancelDrawing}
+										disabled={overpassLoading}
+										className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-600 disabled:opacity-50"
+									>
+										Redraw
+									</button>
+								</div>
+							)
+						})()}
 					</div>
 				)}
 			</div>

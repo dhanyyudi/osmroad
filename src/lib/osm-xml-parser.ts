@@ -1,6 +1,7 @@
 /**
  * Parse Overpass API OSM XML response to GeoJSON
  * Lightweight parser for browser environment
+ * Supports both 'out meta' and 'out geom' formats
  */
 
 interface OSMNode {
@@ -12,7 +13,7 @@ interface OSMNode {
 
 interface OSMWay {
 	id: number
-	nodeRefs: number[]
+	coordinates: [number, number][]
 	tags: Record<string, string>
 }
 
@@ -26,7 +27,7 @@ export function osmXmlToGeoJSON(xml: string): GeoJSON.FeatureCollection {
 		throw new Error("Failed to parse OSM XML")
 	}
 
-	// Parse nodes
+	// Parse nodes (for reference when using 'out meta' format)
 	const nodes = new Map<number, OSMNode>()
 	const nodeElements = doc.querySelectorAll("node")
 	nodeElements.forEach((nodeEl) => {
@@ -49,12 +50,26 @@ export function osmXmlToGeoJSON(xml: string): GeoJSON.FeatureCollection {
 	const wayElements = doc.querySelectorAll("way")
 	wayElements.forEach((wayEl) => {
 		const id = parseInt(wayEl.getAttribute("id") || "0")
-		const nodeRefs: number[] = []
+		const coordinates: [number, number][] = []
 		const tags: Record<string, string> = {}
 
+		// Parse nd elements - support both 'out geom' (lat/lon attributes) and 'out meta' (ref attribute)
 		wayEl.querySelectorAll("nd").forEach((ndEl) => {
-			const ref = parseInt(ndEl.getAttribute("ref") || "0")
-			if (ref) nodeRefs.push(ref)
+			// Check if this is 'out geom' format (has lat/lon directly)
+			const lat = ndEl.getAttribute("lat")
+			const lon = ndEl.getAttribute("lon")
+			
+			if (lat && lon) {
+				// 'out geom' format - coordinates directly in nd element
+				coordinates.push([parseFloat(lon), parseFloat(lat)])
+			} else {
+				// 'out meta' format - reference to node
+				const ref = parseInt(ndEl.getAttribute("ref") || "0")
+				const node = nodes.get(ref)
+				if (node) {
+					coordinates.push([node.lon, node.lat])
+				}
+			}
 		})
 
 		wayEl.querySelectorAll("tag").forEach((tagEl) => {
@@ -63,7 +78,7 @@ export function osmXmlToGeoJSON(xml: string): GeoJSON.FeatureCollection {
 			if (k && v) tags[k] = v
 		})
 
-		ways.push({ id, nodeRefs, tags })
+		ways.push({ id, coordinates, tags })
 	})
 
 	// Convert ways to GeoJSON features
@@ -73,21 +88,13 @@ export function osmXmlToGeoJSON(xml: string): GeoJSON.FeatureCollection {
 		// Only include ways with highway tag
 		if (!way.tags.highway) continue
 
-		const coordinates: [number, number][] = []
-		for (const nodeRef of way.nodeRefs) {
-			const node = nodes.get(nodeRef)
-			if (node) {
-				coordinates.push([node.lon, node.lat])
-			}
-		}
-
-		if (coordinates.length < 2) continue
+		if (way.coordinates.length < 2) continue
 
 		const feature: GeoJSON.Feature = {
 			type: "Feature",
 			geometry: {
 				type: "LineString",
-				coordinates,
+				coordinates: way.coordinates,
 			},
 			properties: {
 				id: way.id,
@@ -113,7 +120,6 @@ export function calculateBboxAreaKm2(
 	maxLon: number,
 	maxLat: number,
 ): number {
-	// Rough calculation using haversine formula approximation
 	const R = 6371 // Earth radius in km
 	const lat1 = (minLat * Math.PI) / 180
 	const lat2 = (maxLat * Math.PI) / 180
