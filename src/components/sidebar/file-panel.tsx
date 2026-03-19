@@ -12,6 +12,13 @@ const SAMPLE_FILES = [
 		name: "Monaco",
 		url: "/samples/monaco.osm.pbf",
 		description: "Dense urban network (~0.7 MB)",
+		format: "pbf" as const,
+	},
+	{
+		name: "Denpasar Center",
+		url: "/samples/denpasar_center.geojson",
+		description: "Central Denpasar roads (~2 MB)",
+		format: "geojson" as const,
 	},
 ]
 
@@ -56,15 +63,30 @@ export function FilePanel() {
 					throw new Error(`Failed to download: ${response.statusText}`)
 				}
 				const blob = await response.blob()
-				const file = new File([blob], `${sample.name.replace(/,\s*/g, "_").toLowerCase()}.osm.pbf`, {
-					type: "application/octet-stream",
-				})
-				const result = await remote.fromPbf(file, { id: file.name })
-				store.setDataset({
-					osmId: result.id,
-					info: result,
-					fileName: file.name,
-				})
+				
+				if (sample.format === "geojson") {
+					// Load as GeoJSON
+					const file = new File([blob], `${sample.name.replace(/,\s*/g, "_").toLowerCase()}.geojson`, {
+						type: "application/geo+json",
+					})
+					const result = await remote.fromGeoJSON(file, { id: file.name })
+					store.setDataset({
+						osmId: result.id,
+						info: result,
+						fileName: file.name,
+					})
+				} else {
+					// Load as PBF
+					const file = new File([blob], `${sample.name.replace(/,\s*/g, "_").toLowerCase()}.osm.pbf`, {
+						type: "application/octet-stream",
+					})
+					const result = await remote.fromPbf(file, { id: file.name })
+					store.setDataset({
+						osmId: result.id,
+						info: result,
+						fileName: file.name,
+					})
+				}
 				store.setLoading(false)
 				store.setProgress(null)
 				setActiveTab("inspect")

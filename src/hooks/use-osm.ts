@@ -75,6 +75,19 @@ async function initRemote(): Promise<OsmixRemote<VizWorker>> {
 			return info as Awaited<ReturnType<OsmixRemote<VizWorker>["fromPbf"]>>
 		}
 
+		r.fromGeoJSON = async (
+			data: ArrayBufferLike | ReadableStream | Uint8Array | File,
+			options: Record<string, unknown> = {},
+		) => {
+			const transferable = await fileToBuffer(data)
+			const info = await workerProxy.fromGeoJSON(
+				Comlink.transfer({ data: transferable, options }, [
+					transferable as ArrayBuffer,
+				]),
+			)
+			return info as Awaited<ReturnType<OsmixRemote<VizWorker>["fromGeoJSON"]>>
+		}
+
 		r.getVectorTile = (osmId: unknown, tile: [number, number, number]) => {
 			return workerProxy.getVectorTile(toId(osmId), tile)
 		}
