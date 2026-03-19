@@ -4,7 +4,8 @@ import { ProgressBar } from "../shared/progress-bar"
 import { useOsmStore } from "../../stores/osm-store"
 import { useUIStore } from "../../stores/ui-store"
 import { useOsm } from "../../hooks/use-osm"
-import { FileText, MapPin, Route, GitBranch, MapPinned, Download, ExternalLink, Globe, Loader2 } from "lucide-react"
+import { osmXmlToGeoJSON, formatBbox, calculateBboxAreaKm2 } from "../../lib/osm-xml-parser"
+import { FileText, MapPin, Route, GitBranch, MapPinned, Download, SquareDashedMousePointer, Loader2, X, Check } from "lucide-react"
 
 // Sample data - Denpasar only (roads/highway only, filtered)
 const SAMPLE_FILE = {
@@ -17,15 +18,20 @@ const SAMPLE_FILE = {
 // Overpass API endpoint
 const OVERPASS_API = "https://overpass-api.de/api/interpreter"
 
+// Maximum allowed area (km²) to prevent huge downloads
+const MAX_AREA_KM2 = 100
+
 export function FilePanel() {
 	const { remote } = useOsm()
 	const { dataset, isLoading, progress, error } = useOsmStore()
 	const setActiveTab = useUIStore((s) => s.setActiveTab)
+	const isDrawingMode = useUIStore((s) => s.isDrawingMode)
+	const setDrawingMode = useUIStore((s) => s.setDrawingMode)
+	const drawnBbox = useUIStore((s) => s.drawnBbox)
+	const clearDrawnBbox = useUIStore((s) => s.clearDrawnBbox)
 	
-	// Overpass download state
-	const [showOverpassForm, setShowOverpassForm] = useState(false)
-	const [bboxInput, setBboxInput] = useState("")
 	const [overpassLoading, setOverpassLoading] = useState(false)
+	const [downloadSuccess, setDownloadSuccess] = useState(false)
 
 	const handleFile = useCallback(
 		async (file: File) => {
@@ -78,61 +84,98 @@ export function FilePanel() {
 		}
 	}, [remote, setActiveTab])
 
+	const startDrawingMode = useCallback(() => {
+		clearDrawnBbox()
+		setDrawingMode(true)
+	}, [clearDrawnBbox, setDrawingMode])
+
+	const cancelDrawing = useCallback(() => {
+		setDrawingMode(false)
+		clearDrawnBbox()
+	}, [setDrawingMode, clearDrawnBbox])
+
 	const downloadFromOverpass = useCallback(async () => {
-		if (!remote || !bboxInput.trim()) return
-		
+		if (!remote || !drawnBbox) return
+
+		// Check area size
+		const areaKm2 = calculateBboxAreaKm2(
+			drawnBbox.minLon,
+			drawnBbox.minLat,
+			drawnBbox.maxLon,
+			drawnBbox.maxLat,
+		)
+
+		if (areaKm2 > MAX_AREA_KM2) {
+			useOsmStore
+				.getState()
+				.setError(
+					`Area too large (${areaKm2.toFixed(1)} km²). Max allowed: ${MAX_AREA_KM2} km². Please select a smaller area.`,
+				)
+			return
+		}
+
 		setOverpassLoading(true)
+		setDownloadSuccess(false)
 		const store = useOsmStore.getState()
 		store.setLoading(true)
 		store.setError(null)
+
 		try {
-			// Parse bbox: minLon,minLat,maxLon,maxLat
-			const bbox = bboxInput.trim().split(",").map(Number)
-			if (bbox.length !== 4 || bbox.some(isNaN)) {
-				throw new Error("Invalid bbox format. Use: minLon,minLat,maxLon,maxLat")
-			}
-			const [minLon, minLat, maxLon, maxLat] = bbox
-			
 			// Build Overpass QL query - roads only for efficiency
-			const query = `[bbox:${minLat},${minLon},${maxLat},${maxLon}];
+			const query = `[bbox:${drawnBbox.minLat},${drawnBbox.minLon},${drawnBbox.maxLat},${drawnBbox.maxLon}];
 (
   way["highway"];
   node(w);
 );
 out meta;`
-			
+
 			// Fetch from Overpass API
 			const response = await fetch(OVERPASS_API, {
 				method: "POST",
 				headers: { "Content-Type": "application/x-www-form-urlencoded" },
 				body: `data=${encodeURIComponent(query)}`,
 			})
-			
+
 			if (!response.ok) {
 				throw new Error(`Overpass API error: ${response.statusText}`)
 			}
-			
+
 			const osmXml = await response.text()
-			
-			// Note: osmix doesn't support OSM XML directly, user needs to convert
-			store.setError("Downloaded OSM XML. Convert to PBF using: osmium cat file.osm -o output.pbf")
-			
-			// Auto-download the file for user
-			const blob = new Blob([osmXml], { type: "application/xml" })
-			const url = URL.createObjectURL(blob)
-			const a = document.createElement("a")
-			a.href = url
-			a.download = `roads_${minLon}_${minLat}.osm`
-			a.click()
-			URL.revokeObjectURL(url)
-			
+
+			// Parse OSM XML to GeoJSON
+			const geojson = osmXmlToGeoJSON(osmXml)
+
+			if (geojson.features.length === 0) {
+				throw new Error("No roads found in selected area. Try a larger area.")
+			}
+
+			// Load GeoJSON directly using fromGeoJSON
+			const fileName = `roads_${drawnBbox.minLon.toFixed(2)}_${drawnBbox.minLat.toFixed(2)}.geojson`
+			const result = await remote.fromGeoJSON(
+				new File([JSON.stringify(geojson)], fileName, { type: "application/geo+json" }),
+				{ id: fileName },
+			)
+
+			store.setDataset({
+				osmId: result.id,
+				info: result,
+				fileName: fileName,
+			})
+
+			setDownloadSuccess(true)
+			setTimeout(() => setDownloadSuccess(false), 3000)
+
+			store.setLoading(false)
+			store.setProgress(null)
+			setDrawingMode(false)
+			clearDrawnBbox()
+			setActiveTab("inspect")
 		} catch (err) {
 			store.setError(String(err))
-		} finally {
 			setOverpassLoading(false)
 			store.setLoading(false)
 		}
-	}, [remote, bboxInput])
+	}, [remote, drawnBbox, clearDrawnBbox, setDrawingMode, setActiveTab])
 
 	return (
 		<div className="flex flex-col gap-4 p-4">
@@ -167,119 +210,90 @@ out meta;`
 			{/* Download from OSM Section */}
 			<div className="rounded-lg bg-zinc-800/50 p-3">
 				<div className="mb-2 flex items-center gap-2">
-					<Globe className="h-4 w-4 text-green-400" />
+					<SquareDashedMousePointer className="h-4 w-4 text-green-400" />
 					<span className="text-xs font-medium text-zinc-300">Download from OSM</span>
 				</div>
-				<p className="mb-2 text-[10px] text-zinc-500">
-					Download road data directly via Overpass API
-				</p>
 				
-				{!showOverpassForm ? (
-					<button
-						onClick={() => setShowOverpassForm(true)}
-						disabled={isLoading || !remote}
-						className="w-full rounded-md bg-green-600/20 px-3 py-2 text-xs font-medium text-green-400 transition-colors hover:bg-green-600/30 disabled:opacity-50"
-					>
-						Define Area of Interest
-					</button>
-				) : (
-					<div className="space-y-2">
-						<div>
-							<label className="mb-1 block text-[10px] text-zinc-400">
-								Bounding Box (lon,lat,lon,lat)
-							</label>
-							<input
-								type="text"
-								value={bboxInput}
-								onChange={(e) => setBboxInput(e.target.value)}
-								placeholder="115.20,-8.70,115.25,-8.65"
-								className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:border-blue-500 focus:outline-none"
-							/>
+				{!isDrawingMode && !drawnBbox && (
+					<>
+						<p className="mb-2 text-[10px] text-zinc-500">
+							Draw a rectangle on the map to select an area
+						</p>
+						<button
+							onClick={startDrawingMode}
+							disabled={isLoading || !remote || overpassLoading}
+							className="w-full rounded-md bg-green-600/20 px-3 py-2 text-xs font-medium text-green-400 transition-colors hover:bg-green-600/30 disabled:opacity-50"
+						>
+							Draw Area on Map
+						</button>
+					</>
+				)}
+
+				{isDrawingMode && !drawnBbox && (
+					<div className="rounded-md bg-blue-500/10 p-3">
+						<div className="flex items-center gap-2 text-blue-400">
+							<Loader2 className="h-4 w-4 animate-spin" />
+							<span className="text-xs font-medium">Drawing mode active...</span>
 						</div>
+						<p className="mt-1 text-[10px] text-blue-300/70">
+							Click and drag on the map to draw a rectangle
+						</p>
+						<button
+							onClick={cancelDrawing}
+							className="mt-2 flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300"
+						>
+							<X className="h-3 w-3" />
+							Cancel
+						</button>
+					</div>
+				)}
+
+				{drawnBbox && (
+					<div className="space-y-2">
+						<div className="rounded-md bg-green-500/10 p-2">
+							<div className="flex items-center gap-1.5 text-green-400">
+								<Check className="h-3.5 w-3.5" />
+								<span className="text-[10px] font-medium">Area selected</span>
+							</div>
+							<div className="mt-1 text-[10px] text-zinc-400 font-mono">
+								{formatBbox(drawnBbox)}
+							</div>
+							<div className="text-[9px] text-zinc-500">
+								Area: ~{calculateBboxAreaKm2(drawnBbox.minLon, drawnBbox.minLat, drawnBbox.maxLon, drawnBbox.maxLat).toFixed(1)} km²
+							</div>
+						</div>
+						
 						<div className="flex gap-2">
 							<button
 								onClick={downloadFromOverpass}
-								disabled={overpassLoading || !bboxInput.trim()}
+								disabled={overpassLoading}
 								className="flex-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-50"
 							>
 								{overpassLoading ? (
 									<span className="flex items-center justify-center gap-1">
 										<Loader2 className="h-3 w-3 animate-spin" />
-										Downloading...
+										Loading...
+									</span>
+								) : downloadSuccess ? (
+									<span className="flex items-center justify-center gap-1">
+										<Check className="h-3 w-3" />
+										Loaded!
 									</span>
 								) : (
-									"Download Roads"
+									"Download & Load"
 								)}
 							</button>
 							<button
-								onClick={() => setShowOverpassForm(false)}
-								className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-600"
+								onClick={cancelDrawing}
+								disabled={overpassLoading}
+								className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-600 disabled:opacity-50"
 							>
-								Cancel
+								Redraw
 							</button>
 						</div>
-						<p className="text-[9px] text-zinc-500">
-							Tip: Get bbox from{" "}
-							<a
-								href="http://bboxfinder.com/"
-								target="_blank"
-								rel="noopener noreferrer"
-								className="text-blue-400 hover:underline"
-							>
-								bboxfinder.com
-							</a>
-						</p>
 					</div>
 				)}
 			</div>
-
-			{/* Help Section */}
-			{!dataset && !isLoading && (
-				<div className="rounded-lg bg-zinc-800/30 p-3 text-xs text-zinc-500">
-					<p className="mb-2">
-						<strong className="text-zinc-400">Need more data?</strong>
-					</p>
-					<ul className="list-disc space-y-1 pl-4">
-						<li>
-							Download from{" "}
-							<a
-								href="https://download.geofabrik.de/"
-								target="_blank"
-								rel="noopener noreferrer"
-								className="inline-flex items-center gap-0.5 text-blue-400 hover:underline"
-							>
-								Geofabrik
-								<ExternalLink className="h-3 w-3" />
-							</a>
-							{" "}(country extracts)
-						</li>
-						<li>
-							Custom extract from{" "}
-							<a
-								href="https://extract.bbbike.org/"
-								target="_blank"
-								rel="noopener noreferrer"
-								className="inline-flex items-center gap-0.5 text-blue-400 hover:underline"
-							>
-								BBBike
-								<ExternalLink className="h-3 w-3" />
-							</a>
-						</li>
-						<li>
-							Or use{" "}
-							<a
-								href="http://bboxfinder.com/"
-								target="_blank"
-								rel="noopener noreferrer"
-								className="text-blue-400 hover:underline"
-							>
-								bboxfinder.com
-							</a>
-							{" "}+ Download from OSM above
-						</li>
-					</ul>
-				</div>
-			)}
 
 			{isLoading && progress && (
 				<ProgressBar

@@ -16,6 +16,7 @@ import { SearchHighlightLayer } from "./search-highlight-layer"
 import { GeocodingOverlay } from "./geocoding-overlay"
 import { BasemapSwitcher } from "./basemap-switcher"
 import { MapLegend } from "./map-legend"
+import { BBoxDrawLayer } from "./bbox-draw-layer"
 // Protocol import ensures it's registered at module load time
 import "../../lib/osmix-vector-protocol"
 
@@ -335,6 +336,7 @@ export function MapViewer() {
 				)}
 				<RouteLayer />
 				<SearchHighlightLayer />
+				<BBoxDrawLayer />
 			</Map>
 			<GeocodingOverlay />
 			<BasemapSwitcher />

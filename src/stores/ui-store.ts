@@ -23,6 +23,13 @@ const LIGHT_BASEMAPS = new Set(["positron", "voyager", "osm-standard", "light"])
 
 export type AppTheme = "dark" | "light"
 
+export type DrawnBbox = {
+	minLon: number
+	minLat: number
+	maxLon: number
+	maxLat: number
+}
+
 interface UIState {
 	activeTab: SidebarTab
 	sidebarOpen: boolean
@@ -30,12 +37,19 @@ interface UIState {
 	basemapId: string
 	legendOpen: boolean
 	theme: AppTheme
+	// Drawing mode states
+	isDrawingMode: boolean
+	drawnBbox: DrawnBbox | null
 
 	setActiveTab: (tab: SidebarTab) => void
 	toggleSidebar: () => void
 	toggleLayer: (layer: keyof LayerVisibility) => void
 	setBasemapId: (id: string) => void
 	setLegendOpen: (open: boolean) => void
+	// Drawing mode actions
+	setDrawingMode: (active: boolean) => void
+	setDrawnBbox: (bbox: DrawnBbox | null) => void
+	clearDrawnBbox: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -51,6 +65,9 @@ export const useUIStore = create<UIState>((set) => ({
 	basemapId: "dark-matter",
 	legendOpen: false,
 	theme: "dark",
+	// Drawing mode
+	isDrawingMode: false,
+	drawnBbox: null,
 
 	setActiveTab: (tab) => set({ activeTab: tab }),
 	toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -64,4 +81,8 @@ export const useUIStore = create<UIState>((set) => ({
 			theme: LIGHT_BASEMAPS.has(id) ? "light" : "dark",
 		}),
 	setLegendOpen: (open) => set({ legendOpen: open }),
+	// Drawing mode
+	setDrawingMode: (active) => set({ isDrawingMode: active }),
+	setDrawnBbox: (bbox) => set({ drawnBbox: bbox }),
+	clearDrawnBbox: () => set({ drawnBbox: null }),
 }))
