@@ -7,3 +7,4 @@ dist/
 .env.*
 .vscode/
 CLAUDE.md
+public/samples/denpasar_original.osm.pbf
