@@ -7,6 +7,7 @@ import { RoutingPanel } from "./routing-panel"
 import { SpeedPanel } from "./speed-panel"
 import { LayersPanel } from "./layers-panel"
 import { ExportPanel } from "./export-panel"
+import { AIQueryPanel } from "./ai-query-panel"
 import {
 	FileText,
 	Search,
@@ -18,6 +19,7 @@ import {
 	Download,
 	PanelLeftClose,
 	PanelLeft,
+	Sparkles,
 } from "lucide-react"
 
 const TABS: Array<{ id: SidebarTab; label: string; icon: typeof FileText }> = [
@@ -40,6 +42,7 @@ const PANELS: Record<SidebarTab, () => React.JSX.Element> = {
 	speed: SpeedPanel,
 	layers: LayersPanel,
 	export: ExportPanel,
+	ai: AIQueryPanel,
 }
 
 export function Sidebar() {
@@ -55,23 +58,40 @@ export function Sidebar() {
 					<PanelLeft className="h-5 w-5" />
 				</button>
 				{/* Icon-only tab bar when collapsed */}
-				{TABS.map(({ id, label, icon: Icon }) => (
-					<button
-						key={id}
-						onClick={() => {
-							setActiveTab(id)
-							toggleSidebar()
-						}}
-						className={`p-2.5 transition-colors ${
-							activeTab === id
-								? "text-blue-400 bg-zinc-800"
-								: "text-zinc-500 hover:text-zinc-300"
-						}`}
-						title={label}
-					>
-						<Icon className="h-4 w-4" />
-					</button>
-				))}
+				<div className="flex-1 overflow-y-auto">
+					{TABS.map(({ id, label, icon: Icon }) => (
+						<button
+							key={id}
+							onClick={() => {
+								setActiveTab(id)
+								toggleSidebar()
+							}}
+							className={`w-full p-2.5 transition-colors ${
+								activeTab === id
+									? "text-blue-400 bg-zinc-800"
+									: "text-zinc-500 hover:text-zinc-300"
+							}`}
+							title={label}
+						>
+							<Icon className="h-4 w-4 mx-auto" />
+						</button>
+					))}
+				</div>
+				{/* AI Tab at bottom */}
+				<button
+					onClick={() => {
+						setActiveTab("ai")
+						toggleSidebar()
+					}}
+					className={`p-2.5 transition-colors border-t border-zinc-800 ${
+						activeTab === "ai"
+							? "text-purple-400 bg-zinc-800"
+							: "text-zinc-500 hover:text-zinc-300"
+					}`}
+					title="AI Query"
+				>
+					<Sparkles className="h-4 w-4 mx-auto" />
+				</button>
 			</div>
 		)
 	}
@@ -88,27 +108,41 @@ export function Sidebar() {
 				>
 					<PanelLeftClose className="h-4.5 w-4.5" />
 				</button>
-				{TABS.map(({ id, label, icon: Icon }) => (
-					<button
-						key={id}
-						onClick={() => setActiveTab(id)}
-						className={`p-2.5 transition-colors ${
-							activeTab === id
-								? "text-blue-400 bg-zinc-800/80"
-								: "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900"
-						}`}
-						title={label}
-					>
-						<Icon className="h-4 w-4" />
-					</button>
-				))}
+				<div className="flex-1 overflow-y-auto">
+					{TABS.map(({ id, label, icon: Icon }) => (
+						<button
+							key={id}
+							onClick={() => setActiveTab(id)}
+							className={`w-full p-2.5 transition-colors ${
+								activeTab === id
+									? "text-blue-400 bg-zinc-800/80"
+									: "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900"
+							}`}
+							title={label}
+						>
+							<Icon className="h-4 w-4 mx-auto" />
+						</button>
+					))}
+				</div>
+				{/* AI Tab at bottom */}
+				<button
+					onClick={() => setActiveTab("ai")}
+					className={`p-2.5 transition-colors border-t border-zinc-800 ${
+						activeTab === "ai"
+							? "text-purple-400 bg-zinc-800/80"
+							: "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900"
+					}`}
+					title="AI Query"
+				>
+					<Sparkles className="h-4 w-4 mx-auto" />
+				</button>
 			</div>
 
 			{/* Panel */}
 			<div className="flex w-72 shrink-0 flex-col bg-zinc-900">
 				<div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
 					<span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
-						{TABS.find((t) => t.id === activeTab)?.label}
+						{activeTab === "ai" ? "AI Query" : TABS.find((t) => t.id === activeTab)?.label}
 					</span>
 					<span className="text-[10px] text-zinc-600">OSMRoad</span>
 				</div>

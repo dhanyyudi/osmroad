@@ -9,6 +9,7 @@ export type SidebarTab =
 	| "speed"
 	| "layers"
 	| "export"
+	| "ai"
 
 interface LayerVisibility {
 	roads: boolean
