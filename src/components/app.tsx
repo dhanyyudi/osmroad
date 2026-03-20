@@ -1,6 +1,7 @@
 import { Sidebar } from "./sidebar/sidebar"
 import { MapViewer } from "./map/map-viewer"
 import { BrowserWarning } from "./browser-warning"
+import { AIQuerySidebar } from "./ai-query"
 import { useUIStore } from "../stores/ui-store"
 
 export function App() {
@@ -13,6 +14,7 @@ export function App() {
 			<div className="flex-1 relative">
 				<MapViewer />
 			</div>
+			<AIQuerySidebar />
 		</div>
 	)
 }

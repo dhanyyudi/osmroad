@@ -13,6 +13,8 @@
 	},
 	"dependencies": {
 		"@duckdb/duckdb-wasm": "^1.29.0",
+		"@google-cloud/vertexai": "^1.10.2",
+		"@google/generative-ai": "^0.24.1",
 		"comlink": "^4.4.2",
 		"lucide-react": "^0.500.0",
 		"maplibre-gl": "^5.5.0",
