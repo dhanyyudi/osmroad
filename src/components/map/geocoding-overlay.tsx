@@ -39,7 +39,7 @@ export function GeocodingOverlay() {
 			const response = await fetch(
 				`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`,
 				{
-					headers: { "User-Agent": "RoadLens/1.0" },
+					headers: { "User-Agent": "OSMRoad/1.0" },
 				},
 			)
 			const data = await response.json()

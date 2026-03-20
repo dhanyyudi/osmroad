@@ -110,7 +110,7 @@ export function Sidebar() {
 					<span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
 						{TABS.find((t) => t.id === activeTab)?.label}
 					</span>
-					<span className="text-[10px] text-zinc-600">RoadLens</span>
+					<span className="text-[10px] text-zinc-600">OSMRoad</span>
 				</div>
 				<div className="flex-1 overflow-y-auto">
 					<PanelComponent />
