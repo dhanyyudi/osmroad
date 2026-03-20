@@ -4,15 +4,22 @@
 
 /**
  * Generate Google Street View URL from lat/lon
- * Format: https://www.google.com/maps/@{lat},{lon},3a,75y,0h,90t
+ * Format lengkap dengan /place/ dan koordinat DMS seperti Google Maps asli
  * 
  * @param lat Latitude
  * @param lon Longitude
  * @returns Google Maps Street View URL
  */
 export function generateStreetViewURL(lat: number, lon: number): string {
-	// Format: @lat,lon,3a (street view),75y (FOV),0h (heading),90t (tilt)
-	return `https://www.google.com/maps/@${lat.toFixed(6)},${lon.toFixed(6)},3a,75y,0h,90t`
+	// Convert to DMS format for the title
+	const latDMS = decimalToDMS(lat, lat >= 0 ? 'N' : 'S')
+	const lonDMS = decimalToDMS(lon, lon >= 0 ? 'E' : 'W')
+	
+	// Encode for URL
+	const locationTitle = encodeURIComponent(`${latDMS}+${lonDMS}`)
+	
+	// Format lengkap: /place/{DMS}/@lat,lon,3a,75y,heading,90t
+	return `https://www.google.com/maps/place/${locationTitle}/@${lat.toFixed(7)},${lon.toFixed(7)},3a,75y,0h,90t`
 }
 
 /**
