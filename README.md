@@ -6,7 +6,7 @@ Load `.osm.pbf` files directly in your browser to visualize, inspect, and analyz
 
 ## 🎬 Demo
 
-https://github.com/user-attachments/assets/PLACEHOLDER_FOR_VIDEO
+https://github.com/user-attachments/assets/4003286d-0a92-4d5c-8e08-1163a5bd989b
 
 **Quick demo:** Upload video directly to GitHub issue/comment and copy the generated URL above.
 
