@@ -79,7 +79,70 @@ It's like Google Maps: as you pan and zoom, new tiles load. But instead of downl
 
 ---
 
-## 2. Routing (Finding the Best Path)
+## 2. AI-Powered Natural Language Queries (NEW!)
+
+### The Problem
+SQL is powerful but intimidating. Most users don't know how to write:
+```sql
+SELECT highway, COUNT(*) FROM roads GROUP BY highway;
+```
+
+But they CAN ask: **"How many roads of each type are there?"**
+
+### The Solution: Natural Language to SQL
+
+**Tech: Google Vertex AI (Gemini) + DuckDB-wasm**
+
+#### Architecture
+
+```
+┌─────────────┐    ┌──────────────────┐    ┌─────────────┐
+│   Browser   │ →  │  Vercel Server   │ →  │ Vertex AI   │
+│  (User)     │    │  (Edge Function) │    │ (Gemini)    │
+└─────────────┘    └──────────────────┘    └─────────────┘
+      ↑                                            ↓
+      └────────────── Return SQL ←─────────────────┘
+                           ↓
+              ┌─────────────────────┐
+              │ DuckDB-wasm (Client)│
+              │ Execute SQL         │
+              └─────────────────────┘
+```
+
+#### How It Works
+
+1. **User types question** (e.g., "berapa jalan tol?")
+2. **Prompt engineering**: We send context (schema, examples, rules) + user query to Vertex AI
+3. **AI generates SQL**: `SELECT COUNT(*) as total FROM roads WHERE highway = 'motorway'`
+4. **Execute on DuckDB**: Client-side SQL execution
+5. **Highlight on map**: Results shown in amber/yellow with auto-zoom
+
+#### Bilingual Support
+
+The AI understands both **English** and **Indonesian**:
+| English | Indonesian | SQL Generated |
+|---------|-----------|---------------|
+| "How many motorways?" | "Berapa jalan tol?" | `SELECT COUNT(*) FROM roads WHERE highway = 'motorway'` |
+| "Show primary roads" | "Tampilkan jalan utama" | `SELECT * FROM roads WHERE highway = 'primary'` |
+| "Average road length" | "Rata-rata panjang jalan" | `SELECT AVG(length_meters) FROM roads` |
+
+#### Smart Query Detection
+
+The system detects query types and shows appropriate responses:
+- **COUNT** → Shows number (e.g., "Ditemukan 15 jalan tol")
+- **AGGREGATE** → Shows statistics (e.g., "avg_length: 1,234m")
+- **SELECT** → Highlights roads on map + auto-zoom
+
+#### Security
+
+- Service Account JSON is **server-side only** (Vercel Edge Function)
+- Prompt injection detection & blocking
+- SQL validation before execution
+- Rate limiting: 10 queries/minute per client
+
+---
+
+## 3. Routing (Finding the Best Path)
 
 ### The Problem
 You click two points on the map. How does the app find the shortest/fastest route between them through potentially millions of roads?
@@ -127,7 +190,34 @@ Instead of checking millions of roads, we might only check thousands.
 
 ---
 
-## 3. Tag Editing (The "Save Changes" Feature)
+## 4. Cursor Coordinates & Street View
+
+### The Problem
+Users want to know exact coordinates and see Street View of locations.
+
+### The Solution: Real-time Coordinate Display + Google Maps Integration
+
+#### Cursor Coordinates
+
+As you move your mouse over the map:
+1. MapLibre converts **screen pixel** → **latitude/longitude** using `map.unproject()`
+2. Display updates in real-time at bottom-left corner
+3. Throttled to ~30fps for performance
+
+#### Street View Integration
+
+When you click a road:
+1. Store the click coordinate (lat/lon) in `SelectedEntity`
+2. Inspect panel shows coordinate with **Copy** button
+3. **"Open Street View"** button generates Google Maps URL:
+   ```
+   https://www.google.com/maps/@lat,lon,3a,75y,0h,90t
+   ```
+4. Opens in new tab (not embedded — respects Google ToS)
+
+---
+
+## 5. Tag Editing (The "Save Changes" Feature)
 
 ### The Problem
 OSM data is just a bunch of "tags" (key-value pairs) on roads:
@@ -168,7 +258,7 @@ When you click "Export," we:
 
 ---
 
-## 4. Overpass API Integration (Fresh OSM Data)
+## 6. Overpass API Integration (Fresh OSM Data)
 
 ### The Problem
 What if users want data for an area they don't have a PBF file for?
@@ -201,7 +291,7 @@ Overpass API is a free public service. If everyone downloaded country-sized data
 
 ---
 
-## 5. SQL Queries with DuckDB (The Power User Feature)
+## 7. SQL Queries with DuckDB (The Power User Feature)
 
 ### The Problem
 Power users want to ask complex questions:
@@ -220,19 +310,19 @@ DuckDB is like **Excel on steroids** that runs entirely in your browser. It can:
 
 #### How We Use It
 
-1. Load OSM data into DuckDB as tables
-2. User writes SQL query
+1. Load OSM data into DuckDB as tables (`roads`, `nodes`)
+2. User writes SQL query (or AI generates it)
 3. DuckDB executes it at native speed (WebAssembly)
-4. Results display on the map
+4. Results display on the map with highlight
 
 #### Example Query
 
 ```sql
-SELECT name, ST_Length(geometry) as length 
+SELECT name, length_meters 
 FROM roads 
 WHERE highway = 'primary' 
-  AND length > 5000
-ORDER BY length DESC;
+  AND length_meters > 5000
+ORDER BY length_meters DESC;
 ```
 
 Translation: "Show me primary roads longer than 5km, sorted by length."
@@ -240,6 +330,49 @@ Translation: "Show me primary roads longer than 5km, sorted by length."
 #### Why WebAssembly?
 
 DuckDB is written in C++. WebAssembly lets us run C++ code in the browser at **near-native speed** — about 10-50x faster than JavaScript for heavy data processing.
+
+---
+
+## 8. Highlighting Query Results on Map
+
+### The Problem
+After a query returns road IDs, how do we highlight them visually?
+
+### The Solution: MapLibre Feature State
+
+**Tech: MapLibre GL JS Feature State**
+
+Instead of recreating layers (slow), we use **feature state**:
+
+```javascript
+// Mark a road as highlighted
+map.setFeatureState(
+  { source, sourceLayer, id: zigzag(roadId) },
+  { highlighted: true }
+)
+```
+
+Then in the style expression:
+```javascript
+"line-color": [
+  "case",
+  ["boolean", ["feature-state", "highlighted"], false],
+  "#fbbf24",  // Amber for highlighted
+  roadColorExpression  // Default color
+]
+```
+
+**Benefits:**
+- No layer recreation → 60fps smooth
+- Instant color change
+- Easy to clear (just remove feature state)
+
+### Auto-Zoom
+
+When SELECT query returns results:
+1. Get geometries of all matching roads
+2. Calculate bounding box (min/max lat/lon)
+3. `map.fitBounds()` with padding
 
 ---
 
@@ -255,7 +388,9 @@ DuckDB is written in C++. WebAssembly lets us run C++ code in the browser at **n
 | **Exporting PBF** | Binary file writing | osmix PBF writer |
 | **Fresh OSM data** | API queries | Overpass API |
 | **Complex SQL queries** | In-browser database | DuckDB-wasm |
+| **Natural language queries** | NL2SQL + Vertex AI | Google Gemini |
 | **Worker communication** | Simplified RPC | Comlink |
+| **Coordinate display** | Real-time projection | MapLibre unproject |
 
 ---
 
@@ -301,11 +436,12 @@ OSMRoad is essentially a **mini-GIS workstation** that runs in your browser. It 
 - Graph algorithms (routing)
 - Binary parsing (PBF)
 - SQL processing (DuckDB)
+- Natural language processing (Vertex AI)
 - GPU rendering (MapLibre)
 
 All working together to let you explore OpenStreetMap data without installing anything or paying for servers.
 
-The magic is in **smart data structures** (not loading everything at once) and **modern web tech** (WebAssembly, Web Workers) that make the browser way more powerful than most people realize.
+The magic is in **smart data structures** (not loading everything at once) and **modern web tech** (WebAssembly, Web Workers, AI APIs) that make the browser way more powerful than most people realize.
 
 ---
 
