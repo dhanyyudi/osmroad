@@ -17,6 +17,7 @@ import { GeocodingOverlay } from "./geocoding-overlay"
 import { BasemapSwitcher } from "./basemap-switcher"
 import { MapLegend } from "./map-legend"
 import { BBoxDrawLayer } from "./bbox-draw-layer"
+import { CursorCoordinates } from "./cursor-coordinates"
 // Protocol import ensures it's registered at module load time
 import "../../lib/osmix-vector-protocol"
 
@@ -248,6 +249,8 @@ export function MapViewer() {
 				type: featureType,
 				tags: tags ?? {},
 				geometry: feature.geometry,
+				lat: event.lngLat.lat,
+				lon: event.lngLat.lng,
 			})
 			setActiveTab("inspect")
 		},
@@ -338,6 +341,7 @@ export function MapViewer() {
 				<SearchHighlightLayer />
 				<BBoxDrawLayer />
 			</Map>
+			<CursorCoordinates />
 			<GeocodingOverlay />
 			<BasemapSwitcher />
 			<MapLegend />

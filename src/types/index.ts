@@ -5,6 +5,8 @@ export interface SelectedEntity {
 	type: "node" | "way" | "relation"
 	tags: Record<string, string>
 	geometry: GeoJSON.Geometry | null
+	lat?: number // Latitude (for inspect panel)
+	lon?: number // Longitude (for inspect panel)
 }
 
 export interface OsmDataset {

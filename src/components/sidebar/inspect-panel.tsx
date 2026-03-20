@@ -1,6 +1,8 @@
 import { useOsmStore } from "../../stores/osm-store"
 import { useSpeedStore } from "../../stores/speed-store"
-import { Tag, Hash, MapPin, Gauge } from "lucide-react"
+import { Tag, Hash, MapPin, Gauge, Copy, ExternalLink } from "lucide-react"
+import { generateStreetViewURL, formatCoordinate, copyToClipboard } from "../../lib/map-utils"
+import { useState } from "react"
 
 const PRIORITY_TAGS = [
 	"name",
@@ -21,6 +23,7 @@ export function InspectPanel() {
 	const entity = useOsmStore((s) => s.selectedEntity)
 	const speedData = useSpeedStore((s) => s.speedData)
 	const speedLoaded = useSpeedStore((s) => s.isLoaded)
+	const [copied, setCopied] = useState(false)
 
 	if (!entity) {
 		return (
@@ -47,6 +50,24 @@ export function InspectPanel() {
 	const waySpeedRecords =
 		entity.type === "way" && speedLoaded ? speedData.get(entity.id) : null
 
+	// Coordinate display
+	const hasCoordinate = entity.lat != null && entity.lon != null
+	const coordString = hasCoordinate
+		? formatCoordinate(entity.lat!, entity.lon!)
+		: null
+	const streetViewUrl = hasCoordinate
+		? generateStreetViewURL(entity.lat!, entity.lon!)
+		: null
+
+	const handleCopy = async () => {
+		if (!coordString) return
+		const success = await copyToClipboard(`${entity.lat}, ${entity.lon}`)
+		if (success) {
+			setCopied(true)
+			setTimeout(() => setCopied(false), 2000)
+		}
+	}
+
 	return (
 		<div className="flex flex-col gap-3 p-3">
 			<div className="flex items-center gap-2">
@@ -55,6 +76,42 @@ export function InspectPanel() {
 					{entity.type}/{entity.id}
 				</span>
 			</div>
+
+			{/* Coordinate Section */}
+			{hasCoordinate && (
+				<div className="flex flex-col gap-2 border-b border-zinc-800 pb-3">
+					<div className="flex items-center gap-1.5 text-xs text-zinc-400">
+						<MapPin className="h-3 w-3" />
+						<span>Coordinate</span>
+					</div>
+					<div className="flex flex-col gap-2">
+						<div className="flex items-center justify-between bg-zinc-800/50 rounded px-2 py-1.5">
+							<span className="text-xs font-mono text-zinc-300">{coordString}</span>
+							<button
+								onClick={handleCopy}
+								className="p-1 hover:bg-zinc-700 rounded transition-colors"
+								title="Copy coordinates"
+							>
+								<Copy className="h-3 w-3 text-zinc-400" />
+							</button>
+						</div>
+						{copied && (
+							<span className="text-[10px] text-green-400">Copied!</span>
+						)}
+						{streetViewUrl && (
+							<a
+								href={streetViewUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="flex items-center justify-center gap-1.5 text-xs bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 px-3 py-1.5 rounded transition-colors"
+							>
+								<ExternalLink className="h-3 w-3" />
+								<span>Open Street View</span>
+							</a>
+						)}
+					</div>
+				</div>
+			)}
 
 			{tagEntries.length === 0 ? (
 				<div className="text-xs text-zinc-500">No tags</div>
