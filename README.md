@@ -4,21 +4,21 @@
 
 Load `.osm.pbf` files directly in your browser to visualize, inspect, and analyze OpenStreetMap road networks. No server required — everything runs client-side using Web Workers and WebAssembly.
 
-<video src="https://i.imgur.com/Uw9FDh5.mp4" autoplay loop muted playsinline width="100%" poster="https://via.placeholder.com/800x450/1f2937/3b82f6?text=OSMRoad+Demo"></video>
+## 🎬 Demo
+
+https://github.com/user-attachments/assets/PLACEHOLDER_FOR_VIDEO
+
+**Quick demo:** Upload video directly to GitHub issue/comment and copy the generated URL above.
+
+Or visit **[osmroad.vercel.app](https://osmroad.vercel.app)** to try it now!
 
 <details>
-<summary>🎬 About This Demo (click to expand)</summary>
+<summary>📋 Demo Features</summary>
 
-**Demo shows:**
 - Loading Denpasar, Bali sample data (~5MB)
 - Interactive road visualization with color-coded highways
 - Drawing area on map and downloading from Overpass API
 - Routing between two points with turn-by-turn directions
-
-**Try it yourself:**
-1. Visit [osmroad.vercel.app](https://osmroad.vercel.app)
-2. Click "⚡ Try Sample Data" to instantly load Denpasar
-3. Or draw a rectangle on the map to download any OSM area!
 
 </details>
 
