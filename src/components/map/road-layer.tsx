@@ -174,6 +174,7 @@ export function RoadLayer({ osmId }: RoadLayerProps) {
 	const nodesVisible = useUIStore((s) => s.layers.nodes)
 	const speedVisible = useUIStore((s) => s.layers.speed)
 	const dataset = useOsmStore((s) => s.dataset)
+	const highlightedWayIds = useOsmStore((s) => s.highlightedWayIds)
 	const speedLoaded = useSpeedStore((s) => s.isLoaded)
 	const speedStats = useSpeedStore((s) => s.stats)
 	const speedData = useSpeedStore((s) => s.speedData)
@@ -640,6 +641,55 @@ export function RoadLayer({ osmId }: RoadLayerProps) {
 		map.on("sourcedata", applyStates)
 		return () => { map.off("sourcedata", applyStates) }
 	}, [colorBySpeed, speedData, speedStats, sourceId, sourceLayerPrefix, mapInstance])
+
+	// ── AI QUERY HIGHLIGHT via feature state ──
+	useEffect(() => {
+		const map = mapInstance?.getMap()
+		if (!map || !createdRef.current) return
+		const sourceLayer = `${sourceLayerPrefix}:ways`
+
+		// Set feature state for highlighted ways
+		for (const wayId of highlightedWayIds) {
+			try {
+				map.setFeatureState(
+					{ source: sourceId, sourceLayer, id: zigzag(wayId) },
+					{ highlighted: true }
+				)
+			} catch { /* feature may not be loaded yet */ }
+		}
+
+		// Cleanup: remove highlight from ways not in set
+		return () => {
+			for (const wayId of highlightedWayIds) {
+				try {
+					map.removeFeatureState(
+						{ source: sourceId, sourceLayer, id: zigzag(wayId) },
+						'highlighted'
+					)
+				} catch { /* ignore */ }
+			}
+		}
+	}, [highlightedWayIds, sourceId, sourceLayerPrefix, mapInstance])
+
+	// Listen untuk zoom event dari AI query
+	useEffect(() => {
+		const map = mapInstance?.getMap()
+		if (!map) return
+
+		const handleZoom = (e: Event) => {
+			const customEvent = e as CustomEvent
+			const bounds = customEvent.detail?.bounds
+			if (bounds && Array.isArray(bounds) && bounds.length === 4) {
+				map.fitBounds(
+					[ [bounds[0], bounds[1]], [bounds[2], bounds[3]] ],
+					{ padding: 50, maxZoom: 16, duration: 1000 }
+				)
+			}
+		}
+
+		window.addEventListener('ai-query-zoom', handleZoom)
+		return () => window.removeEventListener('ai-query-zoom', handleZoom)
+	}, [mapInstance])
 
 	// Component renders nothing — all rendering is via native MapLibre API
 	return null

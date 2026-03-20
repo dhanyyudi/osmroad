@@ -4,6 +4,7 @@ import { useAIQueryStore, type QueryResults } from '@/stores/ai-query-store'
 import { naturalLanguageToSQL } from '@/services/ai/vertex-ai'
 import { useDuckDB } from './use-duckdb'
 import { useOsmDuckDBSync } from './use-osm-duckdb-sync'
+import { useAIMapHighlight } from './use-ai-map-highlight'
 import { detectQueryIntent, mapRoadType } from '@/services/ai/prompt-builder'
 
 export interface UseAIQueryReturn {
@@ -138,6 +139,7 @@ export function useAIQuery(): UseAIQueryReturn {
 	const store = useAIQueryStore()
 	const duckDBState = useDuckDB()
 	const { isSynced: isDataReady, isSyncing, progress: syncProgress } = useOsmDuckDBSync()
+	const { highlightAndZoom, clearHighlight } = useAIMapHighlight()
 	const [isAIConfigured] = useState(true)
 
 	// Execute SQL on DuckDB
@@ -234,6 +236,9 @@ export function useAIQuery(): UseAIQueryReturn {
 						execResult
 					)
 					store.setStatus('completed')
+					
+					// Highlight and zoom to results on map
+					highlightAndZoom(execResult, queryType)
 				}
 			} catch (error) {
 				store.addErrorMessage('Gagal memproses query. Silakan coba lagi.')
@@ -248,7 +253,8 @@ export function useAIQuery(): UseAIQueryReturn {
 		store.clearMessages()
 		store.setCurrentSQL(null)
 		store.setStatus('idle')
-	}, [store])
+		clearHighlight()
+	}, [store, clearHighlight])
 
 	return {
 		isOpen: store.isOpen,
