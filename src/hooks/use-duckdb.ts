@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import * as duckdb from "@duckdb/duckdb-wasm"
+import { isFullMode } from "../lib/browser-support"
 import eh_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url"
 import mvp_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url"
 import duckdb_wasm_eh from "@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url"
@@ -138,7 +139,13 @@ const client: DuckDBClient = {
 	},
 }
 
-async function initDuckDB(): Promise<DuckDBClient> {
+async function initDuckDB(): Promise<DuckDBClient | null> {
+	// Skip initialization in limited mode (Safari)
+	// DuckDB requires SharedArrayBuffer which is not available
+	if (!isFullMode()) {
+		return null
+	}
+
 	if (_conn) return client
 	if (_initPromise) return _initPromise
 
@@ -157,15 +164,26 @@ async function initDuckDB(): Promise<DuckDBClient> {
 
 export function useDuckDB() {
 	const [duckClient, setDuckClient] = useState<DuckDBClient | null>(
-		_conn ? client : null,
+		isFullMode() && _conn ? client : null,
 	)
 	const [error, setError] = useState<string | null>(null)
+	const [isLimited, setIsLimited] = useState(!isFullMode())
 
 	useEffect(() => {
+		// In limited mode, skip DuckDB initialization entirely
+		if (!isFullMode()) {
+			setIsLimited(true)
+			setDuckClient(null)
+			return
+		}
+
 		initDuckDB()
-			.then(setDuckClient)
+			.then((client) => {
+				setDuckClient(client)
+				setIsLimited(false)
+			})
 			.catch((err) => setError(String(err)))
 	}, [])
 
-	return { duckdb: duckClient, error }
+	return { duckdb: duckClient, error, isLimited }
 }
