@@ -26,14 +26,25 @@ export function addOsmixVectorProtocol() {
 			const tileIndex: Tile = [+xStr!, +yStr!, +zStr!]
 			const remote = getOsmRemote()
 			if (!remote || abortController.signal.aborted) return { data: null }
-			const data = await remote.getVectorTile(
-				decodeURIComponent(osmId!),
-				tileIndex,
-			)
+			
+			try {
+				const data = await remote.getVectorTile(
+					decodeURIComponent(osmId!),
+					tileIndex,
+				)
+				
+				if (!data || data.byteLength === 0) {
+					console.warn(`[vector] Empty tile: ${osmId}/${tileIndex[2]}/${tileIndex[0]}/${tileIndex[1]}`)
+					return { data: null }
+				}
 
-			return {
-				data: abortController.signal.aborted ? null : data,
-				cacheControl: "no-cache",
+				return {
+					data: abortController.signal.aborted ? null : data,
+					cacheControl: "no-cache",
+				}
+			} catch (err) {
+				console.error(`[vector] Error loading tile: ${osmId}/${tileIndex[2]}/${tileIndex[0]}/${tileIndex[1]}`, err)
+				return { data: null }
 			}
 		},
 	)

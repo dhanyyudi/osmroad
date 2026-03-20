@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import { useMap } from "react-map-gl/maplibre"
 import { osmixIdToRasterTileUrl } from "../../lib/osmix-raster-protocol"
-import { RASTER_MAX_ZOOM, VECTOR_MIN_ZOOM } from "../../constants"
+import { RASTER_MAX_ZOOM, RASTER_OPACITY } from "../../constants"
 import { useOsmStore } from "../../stores/osm-store"
 import { useUIStore } from "../../stores/ui-store"
 
@@ -18,6 +18,9 @@ function allRasterLayerIds(osmId: string) {
  * Raster preview layer for low-zoom overview.
  * Shows a rasterized image of OSM data for zoom levels where vector tiles
  * would be too heavy to generate (large area coverage).
+ * 
+ * This layer only shows at zoom 0-8. At zoom 9+, it automatically hides
+ * and vector tiles take over for interactive features.
  */
 export function RasterLayer({ osmId }: RasterLayerProps) {
 	const roadsVisible = useUIStore((s) => s.layers.roads)
@@ -41,32 +44,29 @@ export function RasterLayer({ osmId }: RasterLayerProps) {
 			}
 			try { if (map.getSource(sourceId)) map.removeSource(sourceId) } catch { /* */ }
 
-			// Add raster source
+			// Add raster source - only generate tiles for zoom 0-8
 			map.addSource(sourceId, {
 				type: "raster",
 				tiles: [osmixIdToRasterTileUrl(osmId)],
 				bounds,
 				minzoom: 0,
-				maxzoom: RASTER_MAX_ZOOM,
+				maxzoom: RASTER_MAX_ZOOM,  // Only load tiles up to zoom 8
 				tileSize: 256,
 			})
 
-			// Add raster layer
-			// Insert before road layers if they exist, otherwise add on top
-			const beforeLayer = `osmviz:${osmId}:casing`
-			const beforeId = map.getLayer(beforeLayer) ? beforeLayer : undefined
-
+			// Add raster layer at the bottom of all OSM layers
+			// This ensures vector layers will render on top when they appear
 			map.addLayer({
 				id: `osmviz:${osmId}:raster`,
 				type: "raster",
 				source: sourceId,
 				minzoom: 0,
-				maxzoom: VECTOR_MIN_ZOOM, // Hide when vector tiles take over
+				maxzoom: RASTER_MAX_ZOOM, // Only visible up to zoom 8
 				paint: {
-					"raster-opacity": roadsVisible ? 0.9 : 0,
-					"raster-fade-duration": 300,
+					"raster-opacity": roadsVisible ? RASTER_OPACITY : 0,
+					"raster-fade-duration": 200,
 				},
-			}, beforeId)
+			})
 
 			createdRef.current = true
 		}
@@ -106,7 +106,7 @@ export function RasterLayer({ osmId }: RasterLayerProps) {
 				map.setPaintProperty(
 					`osmviz:${osmId}:raster`,
 					"raster-opacity",
-					roadsVisible ? 0.9 : 0
+					roadsVisible ? RASTER_OPACITY : 0
 				)
 			}
 		} catch { /* layer may not exist yet */ }

@@ -74,15 +74,26 @@ export class VizWorker extends OsmixWorker {
 		}
 
 		const encoder = (this as any).vtEncoders[id]
-		if (!encoder) return new ArrayBuffer(0)
+		if (!encoder) {
+			console.warn(`[worker] No vtEncoder for ${id}`)
+			return new ArrayBuffer(0)
+		}
 
-		const data = encoder.getTile(tile)
-		if (!data || data.byteLength === 0) return new ArrayBuffer(0)
+		try {
+			const data = encoder.getTile(tile)
+			if (!data || data.byteLength === 0) {
+				// Empty tile is normal for tiles outside data bounds
+				return new ArrayBuffer(0)
+			}
 
-		// Cache the original, transfer a copy
-		this.tileCache.set(id, tile, data)
-		const copy = data.slice(0)
-		return transfer(copy, [copy]) as unknown as ArrayBuffer
+			// Cache the original, transfer a copy
+			this.tileCache.set(id, tile, data)
+			const copy = data.slice(0)
+			return transfer(copy, [copy]) as unknown as ArrayBuffer
+		} catch (err) {
+			console.error(`[worker] Error generating vector tile ${id}/${tile[2]}/${tile[0]}/${tile[1]}:`, err)
+			return new ArrayBuffer(0)
+		}
 	}
 
 	/**

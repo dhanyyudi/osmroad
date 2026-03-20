@@ -26,6 +26,14 @@ export function addOsmixRasterProtocol() {
 			if (!match) throw new Error(`Bad @osmix/raster URL: ${req.url}`)
 			const [, osmId, zStr, xStr, yStr] = match
 			const tile: Tile = [+xStr!, +yStr!, +zStr!]
+			const zoom = +zStr!
+			
+			// Only generate raster tiles for zoom 0-8
+			// Higher zooms should use vector tiles
+			if (zoom >= 9) {
+				return { data: null }
+			}
+			
 			const remote = getOsmRemote()
 			if (!remote || abortController.signal.aborted) return { data: null }
 
