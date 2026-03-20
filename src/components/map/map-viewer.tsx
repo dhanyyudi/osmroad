@@ -331,15 +331,17 @@ export function MapViewer() {
 				onMouseLeave={handleMouseLeave}
 				cursor={routingActive ? "crosshair" : undefined}
 			>
-				{dataset && (
-					<>
-						<RasterLayer osmId={dataset.osmId} />
-						<RoadLayer osmId={dataset.osmId} />
-						<RestrictionLayer osmId={dataset.osmId} />
-						<AccessLayer osmId={dataset.osmId} />
-						<SpeedLayer osmId={dataset.osmId} />
-					</>
-				)}
+				{(() => {
+					console.log('[MapViewer] dataset:', dataset ? { osmId: dataset.osmId, fileName: dataset.fileName } : null)
+					return dataset ? (
+						<>
+							<RoadLayer osmId={dataset.osmId} />
+							<RestrictionLayer osmId={dataset.osmId} />
+							<AccessLayer osmId={dataset.osmId} />
+							<SpeedLayer osmId={dataset.osmId} />
+						</>
+					) : null
+				})()}
 				<RouteLayer />
 				<SearchHighlightLayer />
 				<BBoxDrawLayer />

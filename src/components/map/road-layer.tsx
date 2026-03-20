@@ -171,6 +171,8 @@ function allLayerIds(osmId: string) {
 }
 
 export function RoadLayer({ osmId }: RoadLayerProps) {
+	console.log(`[RoadLayer] Rendering with osmId: ${osmId}`)
+	
 	const roadsVisible = useUIStore((s) => s.layers.roads)
 	const nodesVisible = useUIStore((s) => s.layers.nodes)
 	const speedVisible = useUIStore((s) => s.layers.speed)
@@ -185,8 +187,11 @@ export function RoadLayer({ osmId }: RoadLayerProps) {
 	const sourceLayerPrefix = `@osmix:${osmId}`
 
 	const bounds = dataset?.info.bbox as [number, number, number, number] | undefined
+	console.log(`[RoadLayer] bounds:`, bounds)
 
 	const colorBySpeed = speedVisible && speedLoaded && speedStats
+
+	console.log(`[RoadLayer] mapInstance:`, mapInstance ? 'exists' : 'null')
 
 	// Dynamic road color
 	const roadColor = useMemo(() => {
