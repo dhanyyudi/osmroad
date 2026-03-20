@@ -49,17 +49,18 @@ Simply **drag & drop** your `.osm.pbf` file onto the map, or use the file picker
 Click **"Load Sample"** to instantly load **Denpasar, Bali** data (~5 MB). Perfect for trying out the app without downloading anything!
 
 ### 3️⃣ Download from OSM (Overpass API)
-Get fresh OSM data for any area in the world:
+Get fresh OSM road data for any area in the world:
 
-1. Click **"Define Area of Interest"** in the sidebar
-2. Go to [bboxfinder.com](http://bboxfinder.com/) to find your bounding box
-3. Draw a rectangle on the map and copy the coordinates
-4. Paste the bbox (format: `minLon,minLat,maxLon,maxLat`) in OSMRoad
-5. Click **"Download Roads"**
-6. The OSM XML file will be downloaded to your computer
-7. Convert to PBF using the command shown, then upload to OSMRoad
+1. Click **"Draw Area on Map"** in the sidebar
+2. **Click and drag** on the map to draw a rectangle around your area of interest
+3. Click **"Download & Load"** — data will be fetched from Overpass API and loaded automatically!
 
-**Example:** For Denpasar area, use bbox: `115.20,-8.70,115.25,-8.65`
+**Tips:**
+- Smaller areas (~2-5 km²) load faster
+- Maximum area: 10 km² (to prevent timeout)
+- Data includes roads only (filtered for efficiency)
+
+**Example:** Try drawing a small rectangle around Kuta, Bali or your neighborhood!
 
 ## 🛠️ Tech Stack
 
@@ -79,10 +80,11 @@ Get fresh OSM data for any area in the world:
 - [x] Tag inspection and editing
 - [x] Export to PBF
 - [x] Sample Data (Denpasar, Bali)
-- [x] Overpass API download
-- [ ] Direct OSM XML to PBF conversion in browser
-- [ ] Interactive bbox drawing on map
-- [ ] More sample cities
+- [x] Overpass API download with interactive bbox drawing
+- [x] Direct OSM XML to GeoJSON conversion in browser
+- [ ] More sample cities (Jakarta, Surabaya, etc.)
+- [ ] Area size preview before download
+- [ ] Download history/cache
 
 ## 📝 License
 
