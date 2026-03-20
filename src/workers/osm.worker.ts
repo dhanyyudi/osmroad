@@ -384,6 +384,125 @@ export class VizWorker extends OsmixWorker {
 		if (!node) return null
 		return [node.lon, node.lat]
 	}
+
+	/**
+	 * Export all ways (roads) data for AI Query
+	 * Returns array of road objects with all relevant properties
+	 */
+	exportRoadsData(osmId: string): Array<{
+		id: number
+		name: string | null
+		highway: string | null
+		length_meters: number
+		tags: Record<string, string>
+		node_ids: number[]
+	}> {
+		const osm = this.get(osmId)
+		const roads: Array<{
+			id: number
+			name: string | null
+			highway: string | null
+			length_meters: number
+			tags: Record<string, string>
+			node_ids: number[]
+		}> = []
+
+		// Get all ways with highway tag (roads)
+		const ways = osm.ways.search("highway")
+		
+		for (const way of ways) {
+			const tags: Record<string, string> = {}
+			if (way.tags) {
+				for (const [k, v] of Object.entries(way.tags)) {
+					tags[k] = String(v)
+				}
+			}
+
+			// Calculate length from coordinates
+			let lengthMeters = 0
+			const coords: Array<[number, number]> = []
+			for (const nodeId of way.refs) {
+				const node = osm.nodes.getById(nodeId)
+				if (node) coords.push([node.lon, node.lat])
+			}
+			
+			// Simple haversine distance calculation
+			for (let i = 1; i < coords.length; i++) {
+				const [lon1, lat1] = coords[i - 1]
+				const [lon2, lat2] = coords[i]
+				lengthMeters += this.haversineDistance(lat1, lon1, lat2, lon2)
+			}
+
+			roads.push({
+				id: way.id,
+				name: way.tags?.name ? String(way.tags.name) : null,
+				highway: way.tags?.highway ? String(way.tags.highway) : null,
+				length_meters: Math.round(lengthMeters),
+				tags,
+				node_ids: way.refs,
+			})
+		}
+
+		return roads
+	}
+
+	/**
+	 * Export all nodes data for AI Query
+	 */
+	exportNodesData(osmId: string): Array<{
+		id: number
+		lat: number
+		lon: number
+		tags: Record<string, string>
+	}> {
+		const osm = this.get(osmId)
+		const nodes: Array<{
+			id: number
+			lat: number
+			lon: number
+			tags: Record<string, string>
+		}> = []
+
+		// Iterate all nodes
+		const allNodes = osm.nodes.getAll()
+		
+		for (const node of allNodes) {
+			const tags: Record<string, string> = {}
+			if (node.tags) {
+				for (const [k, v] of Object.entries(node.tags)) {
+					tags[k] = String(v)
+				}
+			}
+
+			nodes.push({
+				id: node.id,
+				lat: node.lat,
+				lon: node.lon,
+				tags,
+			})
+		}
+
+		return nodes
+	}
+
+	/**
+	 * Calculate haversine distance between two points in meters
+	 */
+	private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+		const R = 6371000 // Earth's radius in meters
+		const toRad = (deg: number) => deg * (Math.PI / 180)
+		
+		const dLat = toRad(lat2 - lat1)
+		const dLon = toRad(lon2 - lon1)
+		
+		const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+			Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+			Math.sin(dLon / 2) * Math.sin(dLon / 2)
+		
+		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+		
+		return R * c
+	}
 }
 
 expose(new VizWorker())

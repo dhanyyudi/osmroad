@@ -3,22 +3,24 @@ import { useState, useCallback } from 'react'
 import { useAIQueryStore, type QueryResults } from '@/stores/ai-query-store'
 import { naturalLanguageToSQL } from '@/services/ai/vertex-ai'
 import { useDuckDB } from './use-duckdb'
+import { useOsmDuckDBSync } from './use-osm-duckdb-sync'
 
 export interface UseAIQueryReturn {
 	// State
 	isOpen: boolean
 	isLoading: boolean
-	status: 'idle' | 'generating' | 'confirming' | 'executing' | 'completed' | 'error'
+	status: 'idle' | 'generating' | 'executing' | 'completed' | 'error'
 	currentSQL: string | null
 	messages: import('@/stores/ai-query-store').QueryMessage[]
+
+	// Data availability
+	isDataReady: boolean
+	isSyncing: boolean
 
 	// Actions
 	toggleOpen: () => void
 	sendQuery: (prompt: string) => Promise<void>
-	confirmSQL: () => Promise<void>
-	rejectSQL: () => void
 	clearChat: () => void
-	executeSQL: (sql: string) => Promise<QueryResults>
 
 	// Status
 	isAIConfigured: boolean
@@ -27,43 +29,8 @@ export interface UseAIQueryReturn {
 export function useAIQuery(): UseAIQueryReturn {
 	const store = useAIQueryStore()
 	const duckDBState = useDuckDB()
+	const { isSynced: isDataReady, isSyncing } = useOsmDuckDBSync()
 	const [isAIConfigured] = useState(true) // Always true with Edge Function
-
-	// Send natural language query
-	const sendQuery = useCallback(
-		async (prompt: string) => {
-			if (!prompt.trim()) return
-
-			// Add user message
-			store.addUserMessage(prompt)
-			store.setCurrentPrompt(prompt)
-			store.setStatus('generating')
-
-			try {
-				// Generate SQL
-				const result = await naturalLanguageToSQL(prompt)
-
-				if (result.error) {
-					store.addErrorMessage(result.error)
-					store.setStatus('error')
-					store.setCurrentSQL(null)
-					return
-				}
-
-				// Show SQL for confirmation
-				store.addAssistantMessage(
-					`I've generated a SQL query for your request. Would you like to execute it?`,
-					result.sql
-				)
-				store.setCurrentSQL(result.sql)
-				store.setStatus('confirming')
-			} catch (error) {
-				store.addErrorMessage('Failed to generate query. Please try again.')
-				store.setStatus('error')
-			}
-		},
-		[store]
-	)
 
 	// Execute SQL on DuckDB
 	const executeSQL = useCallback(
@@ -92,7 +59,8 @@ export function useAIQuery(): UseAIQueryReturn {
 				return {
 					rowCount: result.rows.length,
 					executionTime: performance.now() - startTime,
-					sampleData: result.rows.slice(0, 5), // First 5 rows
+					sampleData: result.rows.slice(0, 5),
+					allData: result.rows,
 				}
 			} catch (error: any) {
 				return {
@@ -105,40 +73,61 @@ export function useAIQuery(): UseAIQueryReturn {
 		[duckDBState]
 	)
 
-	// Confirm and execute SQL
-	const confirmSQL = useCallback(async () => {
-		const sql = store.currentSQL
-		if (!sql) return
+	// Send natural language query - AUTO EXECUTE without confirmation
+	const sendQuery = useCallback(
+		async (prompt: string) => {
+			if (!prompt.trim()) return
+			if (!isDataReady) {
+				store.addErrorMessage('Please load OSM data first before using AI Query.')
+				return
+			}
 
-		store.confirmSQL()
+			// Add user message
+			store.addUserMessage(prompt)
+			store.setCurrentPrompt(prompt)
+			store.setStatus('generating')
 
-		// Get last assistant message ID
-		const messages = useAIQueryStore.getState().messages
-		const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant')
+			try {
+				// Generate SQL
+				const result = await naturalLanguageToSQL(prompt)
 
-		if (!lastAssistantMsg) return
+				if (result.error) {
+					store.addErrorMessage(result.error)
+					store.setStatus('error')
+					store.setCurrentSQL(null)
+					return
+				}
 
-		// Execute
-		const results = await executeSQL(sql)
+				// Store SQL and auto-execute
+				store.setCurrentSQL(result.sql)
+				store.setStatus('executing')
 
-		// Update message with results
-		store.setQueryResults(lastAssistantMsg.id, results)
+				// Auto-execute immediately
+				const execResult = await executeSQL(result.sql)
 
-		// Add summary message
-		if (results.error) {
-			store.addErrorMessage(`Execution failed: ${results.error}`)
-		} else {
-			store.addSystemMessage(
-				`Query completed: ${results.rowCount} rows found in ${results.executionTime.toFixed(0)}ms`
-			)
-		}
-	}, [store, executeSQL])
-
-	// Reject SQL
-	const rejectSQL = useCallback(() => {
-		store.rejectSQL()
-		store.addSystemMessage('Query cancelled. You can try a different question.')
-	}, [store])
+				if (execResult.error) {
+					store.addErrorMessage(`Query failed: ${execResult.error}`)
+					store.setStatus('error')
+				} else {
+					// Show success message with results summary
+					const summary = execResult.rowCount > 0
+						? `Found ${execResult.rowCount} roads matching your query.`
+						: 'No roads found matching your query.'
+					
+					store.addAssistantMessage(
+						summary,
+						result.sql,
+						execResult
+					)
+					store.setStatus('completed')
+				}
+			} catch (error) {
+				store.addErrorMessage('Failed to process query. Please try again.')
+				store.setStatus('error')
+			}
+		},
+		[store, executeSQL, isDataReady]
+	)
 
 	// Clear chat
 	const clearChat = useCallback(() => {
@@ -153,12 +142,11 @@ export function useAIQuery(): UseAIQueryReturn {
 		status: store.status,
 		currentSQL: store.currentSQL,
 		messages: store.messages,
+		isDataReady,
+		isSyncing,
 		toggleOpen: store.toggleOpen,
 		sendQuery,
-		confirmSQL,
-		rejectSQL,
 		clearChat,
-		executeSQL,
 		isAIConfigured,
 	}
 }

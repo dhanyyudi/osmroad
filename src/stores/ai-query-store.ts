@@ -97,8 +97,8 @@ export const useAIQueryStore = create<AIQueryState>()(
 			addUserMessage: (content) =>
 				get().addMessage({ role: 'user', content }),
 
-			addAssistantMessage: (content, sql) =>
-				get().addMessage({ role: 'assistant', content, sql }),
+			addAssistantMessage: (content, sql, results) =>
+				get().addMessage({ role: 'assistant', content, sql, results }),
 
 			addSystemMessage: (content) =>
 				get().addMessage({ role: 'system', content }),

@@ -42,10 +42,10 @@ export function ChatMessage({ message }: ChatMessageProps) {
 				>
 					<p className="whitespace-pre-wrap">{content}</p>
 
-					{/* SQL Display */}
-					{sql && (
-						<div className="mt-2 p-2 bg-background/50 rounded font-mono text-xs overflow-x-auto">
-							<pre>{sql}</pre>
+					{/* SQL Display - only on error for debugging */}
+					{sql && results?.error && (
+						<div className="mt-2 p-2 bg-background/50 rounded font-mono text-xs overflow-x-auto border border-destructive/20">
+							<pre className="text-destructive/80">{sql}</pre>
 						</div>
 					)}
 

@@ -3,17 +3,15 @@ import { useAIQuery } from '@/hooks/use-ai-query'
 import { ChatMessage } from '../ai-query/chat-message'
 import { ChatInput } from '../ai-query/chat-input'
 import { SuggestionChips } from '../ai-query/suggestion-chips'
-import { SQLPreview } from '../ai-query/sql-preview'
-import { Sparkles, Trash2 } from 'lucide-react'
+import { Sparkles, Trash2, Database, Loader2 } from 'lucide-react'
 
 export function AIQueryPanel() {
 	const {
 		messages,
 		status,
-		currentSQL,
 		clearChat,
-		confirmSQL,
-		rejectSQL,
+		isDataReady,
+		isSyncing,
 	} = useAIQuery()
 
 	const scrollRef = useRef<HTMLDivElement>(null)
@@ -25,10 +23,44 @@ export function AIQueryPanel() {
 		}
 	}, [messages])
 
+	// If data not ready, show placeholder
+	if (!isDataReady) {
+		return (
+			<div className="flex flex-col h-full">
+				<div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
+					<div className="flex items-center gap-2">
+						<Sparkles className="w-4 h-4 text-purple-400" />
+						<span className="text-sm font-medium text-zinc-200">Ask AI</span>
+					</div>
+				</div>
+
+				<div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+					{isSyncing ? (
+						<>
+							<Loader2 className="w-8 h-8 text-purple-500 animate-spin mb-3" />
+							<p className="text-sm text-zinc-400">Syncing data to AI...</p>
+							<p className="text-xs text-zinc-600 mt-1">This may take a moment</p>
+						</>
+					) : (
+						<>
+							<Database className="w-10 h-10 text-zinc-700 mb-3" />
+							<p className="text-sm text-zinc-500">
+								Load OSM data to enable AI Query
+							</p>
+							<p className="text-xs text-zinc-600 mt-2">
+								Drop a .pbf file or use sample data
+							</p>
+						</>
+					)}
+				</div>
+			</div>
+		)
+	}
+
 	return (
-		<div className="flex flex-col h-full">
+		<div className="flex flex-col h-full min-h-0">
 			{/* Header */}
-			<div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
+			<div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-900/50 shrink-0">
 				<div className="flex items-center gap-2">
 					<Sparkles className="w-4 h-4 text-purple-400" />
 					<span className="text-sm font-medium text-zinc-200">Ask AI</span>
@@ -66,27 +98,18 @@ export function AIQueryPanel() {
 						<ChatMessage key={message.id} message={message} />
 					))
 				)}
-
-				{/* SQL Preview */}
-				{status === 'confirming' && currentSQL && (
-					<SQLPreview
-						sql={currentSQL}
-						onConfirm={confirmSQL}
-						onReject={rejectSQL}
-					/>
-				)}
 			</div>
 
-			{/* Suggestions */}
+			{/* Suggestions - only show when idle and no messages */}
 			{status === 'idle' && messages.length === 0 && (
-				<div className="border-t border-zinc-800 px-3 py-2">
-					<p className="text-[10px] text-zinc-600 mb-2">Suggestions:</p>
+				<div className="border-t border-zinc-800 px-3 py-2 shrink-0">
+					<p className="text-[10px] text-zinc-600 mb-2">Try asking:</p>
 					<SuggestionChips />
 				</div>
 			)}
 
 			{/* Input */}
-			<div className="border-t border-zinc-800 p-3">
+			<div className="border-t border-zinc-800 p-3 shrink-0">
 				<ChatInput />
 			</div>
 		</div>
