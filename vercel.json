@@ -9,11 +9,11 @@
 				},
 				{
 					"key": "Cross-Origin-Embedder-Policy",
-					"value": "credentialless"
+					"value": "require-corp"
 				},
 				{
 					"key": "Cross-Origin-Resource-Policy",
-					"value": "same-origin"
+					"value": "cross-origin"
 				}
 			]
 		}
