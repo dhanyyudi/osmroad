@@ -16,6 +16,7 @@ export interface UseAIQueryReturn {
 	// Data availability
 	isDataReady: boolean
 	isSyncing: boolean
+	syncProgress: number
 
 	// Actions
 	toggleOpen: () => void
@@ -29,7 +30,7 @@ export interface UseAIQueryReturn {
 export function useAIQuery(): UseAIQueryReturn {
 	const store = useAIQueryStore()
 	const duckDBState = useDuckDB()
-	const { isSynced: isDataReady, isSyncing } = useOsmDuckDBSync()
+	const { isSynced: isDataReady, isSyncing, progress: syncProgress } = useOsmDuckDBSync()
 	const [isAIConfigured] = useState(true) // Always true with Edge Function
 
 	// Execute SQL on DuckDB
@@ -144,6 +145,7 @@ export function useAIQuery(): UseAIQueryReturn {
 		messages: store.messages,
 		isDataReady,
 		isSyncing,
+		syncProgress,
 		toggleOpen: store.toggleOpen,
 		sendQuery,
 		clearChat,

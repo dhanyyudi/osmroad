@@ -12,6 +12,7 @@ export function AIQueryPanel() {
 		clearChat,
 		isDataReady,
 		isSyncing,
+		syncProgress,
 	} = useAIQuery()
 
 	const scrollRef = useRef<HTMLDivElement>(null)
@@ -39,7 +40,13 @@ export function AIQueryPanel() {
 						<>
 							<Loader2 className="w-8 h-8 text-purple-500 animate-spin mb-3" />
 							<p className="text-sm text-zinc-400">Syncing data to AI...</p>
-							<p className="text-xs text-zinc-600 mt-1">This may take a moment</p>
+							<div className="w-32 h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
+								<div 
+									className="h-full bg-purple-500 transition-all duration-300"
+									style={{ width: `${syncProgress}%` }}
+								/>
+							</div>
+							<p className="text-xs text-zinc-600 mt-1">{syncProgress}%</p>
 						</>
 					) : (
 						<>

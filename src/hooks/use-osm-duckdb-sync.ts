@@ -13,15 +13,18 @@ export function useOsmDuckDBSync() {
 	const [isSyncing, setIsSyncing] = useState(false)
 	const [isSynced, setIsSynced] = useState(false)
 	const [error, setError] = useState<string | null>(null)
+	const [progress, setProgress] = useState(0)
 
 	const syncData = useCallback(async () => {
 		if (!dataset || !duckdb || isLimited) {
 			setIsSynced(false)
+			setProgress(0)
 			return
 		}
 
 		setIsSyncing(true)
 		setError(null)
+		setProgress(0)
 
 		try {
 			const remote = getOsmRemote()
@@ -32,67 +35,50 @@ export function useOsmDuckDBSync() {
 			const worker = remote.getWorker()
 			
 			// Export roads data from worker
+			setProgress(10)
 			const roads = await worker.exportRoadsData(dataset.osmId)
+			setProgress(30)
 			
-			// Create roads table in DuckDB
+			// Create roads table in DuckDB with BIGINT for IDs
 			await duckdb.executeQuery(`
 				CREATE OR REPLACE TABLE roads (
-					id INTEGER,
+					id BIGINT,
 					name VARCHAR,
 					highway VARCHAR,
 					length_meters DOUBLE,
-					tags JSON,
-					node_ids INTEGER[]
+					tags JSON
 				)
 			`)
+			setProgress(40)
 
 			// Insert roads data in batches
-			const batchSize = 1000
+			const batchSize = 500
+			const totalBatches = Math.ceil(roads.length / batchSize)
+			
 			for (let i = 0; i < roads.length; i += batchSize) {
 				const batch = roads.slice(i, i + batchSize)
-				const values = batch.map(r => 
-					`(${r.id}, ${r.name ? `'${r.name.replace(/'/g, "''")}'` : 'NULL'}, ` +
-					`${r.highway ? `'${r.highway}'` : 'NULL'}, ${r.length_meters}, ` +
-					`'${JSON.stringify(r.tags)}', [${r.node_ids.join(',')}])`
-				).join(',')
+				const values = batch.map(r => {
+					const name = r.name ? `'${r.name.replace(/'/g, "''")}'` : 'NULL'
+					const highway = r.highway ? `'${r.highway}'` : 'NULL'
+					const tags = JSON.stringify(r.tags).replace(/'/g, "''")
+					return `(${r.id}::BIGINT, ${name}, ${highway}, ${r.length_meters}, '${tags}'::JSON)`
+				}).join(',')
 
 				await duckdb.executeQuery(`
 					INSERT INTO roads VALUES ${values}
 				`)
-			}
-
-			// Export nodes data
-			const nodes = await worker.exportNodesData(dataset.osmId)
-			
-			// Create nodes table
-			await duckdb.executeQuery(`
-				CREATE OR REPLACE TABLE nodes (
-					id INTEGER,
-					lat DOUBLE,
-					lon DOUBLE,
-					tags JSON
-				)
-			`)
-
-			// Insert nodes in batches
-			for (let i = 0; i < nodes.length; i += batchSize) {
-				const batch = nodes.slice(i, i + batchSize)
-				const values = batch.map(n => 
-					`(${n.id}, ${n.lat}, ${n.lon}, '${JSON.stringify(n.tags)}')`
-				).join(',')
-
-				await duckdb.executeQuery(`
-					INSERT INTO nodes VALUES ${values}
-				`)
+				
+				const batchNum = Math.floor(i / batchSize) + 1
+				setProgress(40 + Math.round((batchNum / totalBatches) * 50))
 			}
 
 			// Create indexes
 			await duckdb.executeQuery('CREATE INDEX IF NOT EXISTS idx_roads_highway ON roads(highway)')
 			await duckdb.executeQuery('CREATE INDEX IF NOT EXISTS idx_roads_name ON roads(name)')
-			await duckdb.executeQuery('CREATE INDEX IF NOT EXISTS idx_nodes_id ON nodes(id)')
+			setProgress(100)
 
 			setIsSynced(true)
-			console.log(`[OsmDuckDBSync] Synced ${roads.length} roads and ${nodes.length} nodes to DuckDB`)
+			console.log(`[OsmDuckDBSync] Synced ${roads.length} roads to DuckDB`)
 		} catch (err) {
 			console.error('[OsmDuckDBSync] Failed to sync:', err)
 			setError(String(err))
@@ -106,5 +92,5 @@ export function useOsmDuckDBSync() {
 		syncData()
 	}, [syncData])
 
-	return { isSyncing, isSynced, error, syncData }
+	return { isSyncing, isSynced, error, progress, syncData }
 }

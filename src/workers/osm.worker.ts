@@ -395,7 +395,6 @@ export class VizWorker extends OsmixWorker {
 		highway: string | null
 		length_meters: number
 		tags: Record<string, string>
-		node_ids: number[]
 	}> {
 		const osm = this.get(osmId)
 		const roads: Array<{
@@ -404,7 +403,6 @@ export class VizWorker extends OsmixWorker {
 			highway: string | null
 			length_meters: number
 			tags: Record<string, string>
-			node_ids: number[]
 		}> = []
 
 		// Get all ways with highway tag (roads)
@@ -439,50 +437,10 @@ export class VizWorker extends OsmixWorker {
 				highway: way.tags?.highway ? String(way.tags.highway) : null,
 				length_meters: Math.round(lengthMeters),
 				tags,
-				node_ids: way.refs,
 			})
 		}
 
 		return roads
-	}
-
-	/**
-	 * Export all nodes data for AI Query
-	 */
-	exportNodesData(osmId: string): Array<{
-		id: number
-		lat: number
-		lon: number
-		tags: Record<string, string>
-	}> {
-		const osm = this.get(osmId)
-		const nodes: Array<{
-			id: number
-			lat: number
-			lon: number
-			tags: Record<string, string>
-		}> = []
-
-		// Iterate all nodes
-		const allNodes = osm.nodes.getAll()
-		
-		for (const node of allNodes) {
-			const tags: Record<string, string> = {}
-			if (node.tags) {
-				for (const [k, v] of Object.entries(node.tags)) {
-					tags[k] = String(v)
-				}
-			}
-
-			nodes.push({
-				id: node.id,
-				lat: node.lat,
-				lon: node.lon,
-				tags,
-			})
-		}
-
-		return nodes
 	}
 
 	/**
