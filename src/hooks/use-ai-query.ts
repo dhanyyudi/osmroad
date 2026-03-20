@@ -89,9 +89,9 @@ function formatResultMessage(queryType: 'count' | 'aggregate' | 'select' | 'grou
 			count = row.total ?? row.count ?? row.count_star?.() ?? Object.values(row)[0] ?? 0
 		}
 		if (count === 0) {
-			return `Tidak ditemukan ${roadType} yang sesuai.`
+			return `Tidak ditemukan ${roadType}.`
 		}
-		return `Ditemukan **${count}** ${roadType}.`
+		return `Ditemukan ${count} ${roadType}.`
 	}
 
 	if (queryType === 'group') {
