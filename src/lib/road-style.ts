@@ -1,96 +1,104 @@
 import type { ExpressionSpecification } from "maplibre-gl"
 
 /**
- * iD Editor highway colors — exact values from osm-id-editor-highway-colors.md
- * Reference: openstreetmap-carto + iD Editor source
+ * OSMRoad Colorblind-Friendly Highway Colors
  * 
- * Highlight color: amber-400 (#fbbf24) untuk AI Query results
+ * Palette yang dirancang untuk accessibility:
+ * - Menggunakan hue yang berbeda jauh (bukan red-green-orange yang mirip)
+ * - Kontras brightness yang jelas
+ * - Cocok untuk Deuteranopia (red-green color blindness)
+ * 
+ * Warna dipilih berdasarkan ColorBrewer dan research accessibility:
+ * https://colorbrewer2.org/
  */
 
 // Highlight color untuk AI Query results
 const HIGHLIGHT_COLOR = "#fbbf24" // amber-400
 
-// Fill colors (main road color) dengan support untuk highlighted state
+// Colorblind-friendly palette - menggunakan warna dengan hue berbeda jauh
+// Hindari kombinasi red-green, gunakan blue-purple-orange-cyan
 export const roadColorExpression: ExpressionSpecification = [
 	"case",
 	// Jika highlighted (dari AI Query), gunakan warna kuning
 	["boolean", ["feature-state", "highlighted"], false],
 	HIGHLIGHT_COLOR,
-	// Default colors by highway type
+	// Default colors - Colorblind-friendly palette
 	[
 		"match",
 		["get", "highway"],
-		// Major roads
-		"motorway", "#e892a2",
-		"motorway_link", "#e892a2",
-		"trunk", "#f9b29c",
-		"trunk_link", "#f9b29c",
-		"primary", "#fcd6a4",
-		"primary_link", "#fcd6a4",
-		"secondary", "#f7fabf",
-		"secondary_link", "#f7fabf",
-		"tertiary", "#ffffff",
-		"tertiary_link", "#ffffff",
-		// Minor roads
-		"unclassified", "#ffffff",
-		"residential", "#ffffff",
-		"living_street", "#ededed",
-		"service", "#ffffff",
-		"pedestrian", "#dddddd",
-		"road", "#dddddd",
-		// Paths (dashed)
-		"footway", "#ff6666",
-		"sidewalk", "#ff6666",
-		"cycleway", "#5555ff",
-		"path", "#776a6a",
-		"track", "#996633",
-		"steps", "#ff6666",
-		"bridleway", "#996633",
+		// Motorway: Biru Tua (kontras tinggi, mudah dibedakan)
+		"motorway", "#0055CC",      // Deep Blue
+		"motorway_link", "#0055CC",
+		// Trunk: Ungu/Magenta (kontras dengan biru)
+		"trunk", "#8B008B",         // Dark Magenta
+		"trunk_link", "#8B008B",
+		// Primary: Oranye/Kuning (kontras dengan biru dan ungu)
+		"primary", "#FF8C00",       // Dark Orange
+		"primary_link", "#FF8C00",
+		// Secondary: Hijau Tosca/Cyan (berbeda dengan yang lain)
+		"secondary", "#008B8B",     // Dark Cyan
+		"secondary_link", "#008B8B",
+		// Tertiary: Pink/Rose
+		"tertiary", "#C71585",      // Medium Violet Red
+		"tertiary_link", "#C71585",
+		// Minor roads - grayscale dengan perbedaan jelas
+		"unclassified", "#6B7280",  // gray-500
+		"residential", "#4B5563",   // gray-600 - lebih gelap
+		"living_street", "#374151", // gray-700 - lebih gelap lagi
+		"service", "#9CA3AF",       // gray-400 - lebih terang, beda jauh
+		"pedestrian", "#D1D5DB",    // gray-300 - paling terang
+		"road", "#9CA3AF",
+		// Paths - warna yang berbeda
+		"footway", "#4B0082",       // Indigo
+		"sidewalk", "#4B0082",
+		"cycleway", "#20B2AA",      // Light Sea Green
+		"path", "#9370DB",          // Medium Purple
+		"track", "#B8860B",         // Dark Goldenrod
+		"steps", "#4B0082",
+		"bridleway", "#B8860B",
 		// Special
-		"construction", "#f7a030",
-		"proposed", "#aaaaaa",
-		"#dddddd", // default
+		"construction", "#FF6347",  // Tomato
+		"proposed", "#94A3B8",      // gray-400
+		"#9CA3AF", // default
 	]
 ] as ExpressionSpecification
 
-// Casing colors (outline/border — darker than fill) dengan highlight support
+// Casing colors - darker variants
 export const roadCasingColorExpression: ExpressionSpecification = [
 	"case",
-	// Jika highlighted, casing lebih gelap dari highlight
 	["boolean", ["feature-state", "highlighted"], false],
-	"#d97706", // amber-600
-	// Default casing colors
+	"#D97706", // amber-600
 	[
 		"match",
 		["get", "highway"],
-		"motorway", "#c24e6b",
-		"motorway_link", "#c24e6b",
-		"trunk", "#d1684a",
-		"trunk_link", "#d1684a",
-		"primary", "#a06b00",
-		"primary_link", "#a06b00",
-		"secondary", "#707d05",
-		"secondary_link", "#707d05",
-		"tertiary", "#c6c6c6",
-		"tertiary_link", "#c6c6c6",
-		"unclassified", "#c6c6c6",
-		"residential", "#c6c6c6",
-		"living_street", "#b8b8b8",
-		"service", "#d4d4d4",
-		"pedestrian", "#aaaaaa",
-		"footway", "#cc4444",
-		"sidewalk", "#cc4444",
-		"cycleway", "#3333cc",
-		"path", "#554f4f",
-		"track", "#6b4520",
-		"steps", "#cc4444",
-		"bridleway", "#6b4520",
-		"construction", "#c47a05",
-		"#cccccc", // default
+		"motorway", "#003380",      // Darker Blue
+		"motorway_link", "#003380",
+		"trunk", "#5C005C",         // Darker Magenta
+		"trunk_link", "#5C005C",
+		"primary", "#CC5500",       // Darker Orange
+		"primary_link", "#CC5500",
+		"secondary", "#006666",     // Darker Cyan
+		"secondary_link", "#006666",
+		"tertiary", "#8B0A50",      // Darker Violet Red
+		"tertiary_link", "#8B0A50",
+		"unclassified", "#374151",  // gray-700
+		"residential", "#374151",
+		"living_street", "#1F2937", // gray-800
+		"service", "#4B5563",
+		"pedestrian", "#9CA3AF",
+		"footway", "#2E0052",       // Darker Indigo
+		"sidewalk", "#2E0052",
+		"cycleway", "#167A75",      // Darker Sea Green
+		"path", "#6B4E9C",          // Darker Purple
+		"track", "#8B6914",         // Darker Goldenrod
+		"steps", "#2E0052",
+		"bridleway", "#8B6914",
+		"construction", "#CC4A33",
+		"#6B7280", // default
 	]
 ] as ExpressionSpecification
 
-// Line widths by highway class dengan highlight (lebih tebal saat highlight)
+// Line widths - tetap sama tapi ditambah pola untuk accessibility
 export const roadWidthExpression: ExpressionSpecification = [
 	"interpolate",
 	["linear"],
@@ -99,14 +107,14 @@ export const roadWidthExpression: ExpressionSpecification = [
 	[
 		"case",
 		["boolean", ["feature-state", "highlighted"], false],
-		5, // Lebih tebal saat highlight
+		5,
 		[
 			"match",
 			["get", "highway"],
-			"motorway", 3,
-			"trunk", 2.5,
-			"primary", 2,
-			"secondary", 1.5,
+			"motorway", 4,    // Lebih tebal untuk motorway
+			"trunk", 3.5,
+			"primary", 3,
+			"secondary", 2.5,
 			"footway", 1,
 			"cycleway", 1,
 			0.8,
@@ -116,15 +124,15 @@ export const roadWidthExpression: ExpressionSpecification = [
 	[
 		"case",
 		["boolean", ["feature-state", "highlighted"], false],
-		14, // Lebih tebal saat highlight
+		14,
 		[
 			"match",
 			["get", "highway"],
-			"motorway", 10,
-			"trunk", 8,
-			"primary", 7,
-			"secondary", 6,
-			"tertiary", 4,
+			"motorway", 12,   // Lebih tebal untuk motorway
+			"trunk", 10,
+			"primary", 9,
+			"secondary", 7,
+			"tertiary", 5,
 			"unclassified", 4,
 			"residential", 4,
 			"living_street", 3,
@@ -142,19 +150,19 @@ export const roadWidthExpression: ExpressionSpecification = [
 	[
 		"case",
 		["boolean", ["feature-state", "highlighted"], false],
-		22, // Lebih tebal saat highlight
+		22,
 		[
 			"match",
 			["get", "highway"],
-			"motorway", 18,
-			"trunk", 15,
-			"primary", 13,
-			"secondary", 11,
-			"tertiary", 8,
-			"unclassified", 7,
-			"residential", 7,
-			"living_street", 6,
-			"service", 5,
+			"motorway", 20,
+			"trunk", 17,
+			"primary", 15,
+			"secondary", 13,
+			"tertiary", 10,
+			"unclassified", 8,
+			"residential", 8,
+			"living_street", 7,
+			"service", 6,
 			"footway", 3,
 			"sidewalk", 3,
 			"cycleway", 3,
@@ -166,7 +174,7 @@ export const roadWidthExpression: ExpressionSpecification = [
 	],
 ] as ExpressionSpecification
 
-// Casing widths (wider than fill to create border effect)
+// Casing widths
 export const roadCasingWidthExpression: ExpressionSpecification = [
 	"interpolate",
 	["linear"],
@@ -175,38 +183,38 @@ export const roadCasingWidthExpression: ExpressionSpecification = [
 	[
 		"match",
 		["get", "highway"],
-		"motorway", 4,
-		"trunk", 3.5,
-		"primary", 3,
-		"secondary", 2.5,
+		"motorway", 5,
+		"trunk", 4.5,
+		"primary", 4,
+		"secondary", 3.5,
 		1,
 	],
 	14,
 	[
 		"match",
 		["get", "highway"],
-		"motorway", 12,
-		"trunk", 10,
-		"primary", 9,
-		"secondary", 8,
-		"tertiary", 6,
-		"residential", 5,
-		"service", 3,
+		"motorway", 14,
+		"trunk", 12,
+		"primary", 11,
+		"secondary", 9,
+		"tertiary", 7,
+		"residential", 6,
+		"service", 4,
 		4,
 	],
 	18,
 	[
 		"match",
 		["get", "highway"],
-		"motorway", 22,
-		"trunk", 19,
-		"primary", 17,
-		"secondary", 15,
-		"tertiary", 12,
-		"unclassified", 11,
-		"residential", 11,
-		"living_street", 10,
-		"service", 9,
+		"motorway", 24,
+		"trunk", 21,
+		"primary", 19,
+		"secondary", 17,
+		"tertiary", 14,
+		"unclassified", 13,
+		"residential", 13,
+		"living_street", 12,
+		"service", 11,
 		10,
 	],
 ]
@@ -223,3 +231,44 @@ export const DASHED_HIGHWAYS = new Set([
 	"construction",
 	"proposed",
 ])
+
+/** Road type labels for legend */
+export const ROAD_TYPE_LABELS: Record<string, string> = {
+	motorway: "Motorway",
+	motorway_link: "Motorway Link",
+	trunk: "Trunk Road",
+	trunk_link: "Trunk Link",
+	primary: "Primary Road",
+	primary_link: "Primary Link",
+	secondary: "Secondary Road",
+	secondary_link: "Secondary Link",
+	tertiary: "Tertiary Road",
+	tertiary_link: "Tertiary Link",
+	unclassified: "Unclassified",
+	residential: "Residential",
+	living_street: "Living Street",
+	service: "Service Road",
+	pedestrian: "Pedestrian",
+	footway: "Footway",
+	sidewalk: "Sidewalk",
+	cycleway: "Cycleway",
+	path: "Path",
+	track: "Track",
+	steps: "Steps",
+	bridleway: "Bridleway",
+	construction: "Construction",
+	proposed: "Proposed",
+	road: "Road",
+}
+
+/** Color descriptions for accessibility */
+export const ROAD_COLOR_DESCRIPTIONS: Record<string, string> = {
+	motorway: "Dark Blue",
+	trunk: "Purple/Magenta",
+	primary: "Orange",
+	secondary: "Teal/Cyan",
+	tertiary: "Pink",
+	residential: "Gray",
+	footway: "Indigo",
+	cycleway: "Sea Green",
+}

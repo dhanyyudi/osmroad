@@ -115,7 +115,13 @@ export function SpeedPanel() {
 			/>
 
 			{isLoading && (
-				<ProgressBar progress={0.5} label="Loading CSV into DuckDB..." />
+				<ProgressBar progress={{ 
+					msg: "Loading CSV into DuckDB...", 
+					timestamp: Date.now(), 
+					level: "info",
+					stage: "parsing",
+					percent: 50 
+				}} />
 			)}
 
 			{(duckdbError || loadError) && (

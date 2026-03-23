@@ -21,11 +21,12 @@ import { CursorCoordinates } from "./cursor-coordinates"
 import { ZoomNotification } from "./zoom-notification"
 import { VectorLoadingIndicator } from "./vector-loading-indicator"
 import { MemoryMonitor } from "./memory-monitor"
+import { VectorTilesProgress } from "./vector-tiles-progress"
 // Protocol imports ensure they're registered at module load time
 import "../../lib/osmix-vector-protocol"
 import "../../lib/osmix-raster-protocol"
 
-const SNAP_RADIUS_M = 1_000
+const SNAP_RADIUS_M = 200  // Reduced for more precise snapping
 
 /** Minimal style spec for OSM raster tiles */
 const OSM_RASTER_STYLE: maplibregl.StyleSpecification = {
@@ -370,6 +371,7 @@ export function MapViewer() {
 			<ZoomNotification />
 			<VectorLoadingIndicator />
 			<MemoryMonitor />
+			<VectorTilesProgress />
 			<GeocodingOverlay />
 			<BasemapSwitcher />
 			<MapLegend />

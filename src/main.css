@@ -10,8 +10,49 @@ body,
 	overflow: hidden;
 }
 
-/*
- * Light theme: swap zinc shades so that dark-mode Tailwind classes
+/* OSMRoad Professional Color System */
+:root {
+	/* Primary Brand Colors */
+	--osmroad-primary: #2563eb;
+	--osmroad-primary-dark: #1d4ed8;
+	--osmroad-primary-light: #3b82f6;
+	--osmroad-secondary: #64748b;
+	
+	/* Semantic Colors */
+	--osmroad-success: #10b981;
+	--osmroad-warning: #f59e0b;
+	--osmroad-danger: #ef4444;
+	--osmroad-info: #3b82f6;
+	
+	/* Road Classification Colors */
+	--road-motorway: #dc2626;
+	--road-trunk: #ea580c;
+	--road-primary: #d97706;
+	--road-secondary: #65a30d;
+	--road-tertiary: #0891b2;
+	--road-residential: #6b7280;
+	--road-service: #9ca3af;
+	--road-track: #a16207;
+	--road-footway: #7c3aed;
+	
+	/* UI Colors - Dark Theme (Default) */
+	--bg-primary: #0a0a0f;
+	--bg-secondary: #13131f;
+	--bg-tertiary: #1e1e2e;
+	--bg-elevated: #252542;
+	--text-primary: #f8fafc;
+	--text-secondary: #94a3b8;
+	--text-muted: #64748b;
+	--border-color: #2d2d44;
+	--border-hover: #3d3d5c;
+	
+	/* Interactive States */
+	--hover-bg: rgba(255, 255, 255, 0.05);
+	--active-bg: rgba(255, 255, 255, 0.1);
+	--focus-ring: rgba(37, 99, 235, 0.5);
+}
+
+/* Light theme: swap zinc shades so that dark-mode Tailwind classes
  * (bg-zinc-900, text-zinc-200 etc.) automatically render as light.
  * We invert the scale: 950↔50, 900↔100, 800↔200, etc.
  */
@@ -27,6 +68,17 @@ body,
 	--color-zinc-200: oklch(0.274 0.006 286.033);   /* → zinc-800 */
 	--color-zinc-100: oklch(0.21 0.006 285.885);    /* → zinc-900 */
 	--color-zinc-50: oklch(0.141 0.005 285.823);    /* → zinc-950 */
+	
+	/* Light Theme UI Colors */
+	--bg-primary: #ffffff;
+	--bg-secondary: #f8fafc;
+	--bg-tertiary: #f1f5f9;
+	--bg-elevated: #e2e8f0;
+	--text-primary: #0f172a;
+	--text-secondary: #475569;
+	--text-muted: #64748b;
+	--border-color: #e2e8f0;
+	--border-hover: #cbd5e1;
 }
 
 /* Light theme: also fix colors that don't map through zinc */
@@ -52,4 +104,55 @@ body,
 
 .maplibregl-popup-tip {
 	border-top-color: #1e1e2e;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--border-color);
+	border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--border-hover);
+}
+
+/* Hide scrollbar for mobile bottom sheet tabs */
+.scrollbar-hide {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+	display: none;
+}
+
+/* Smooth transitions */
+.transition-smooth {
+	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Focus styles */
+.focus-ring:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+/* Glass morphism effect */
+.glass {
+	background: rgba(30, 30, 46, 0.8);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
+}
+
+.theme-light .glass {
+	background: rgba(255, 255, 255, 0.8);
 }

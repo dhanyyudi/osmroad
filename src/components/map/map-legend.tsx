@@ -43,17 +43,18 @@ const NODE_LEGEND: Array<{
 ]
 
 const ROAD_LEGEND = [
-	{ color: "#e892a2", label: "Motorway" },
-	{ color: "#f9b29c", label: "Trunk" },
-	{ color: "#fcd6a4", label: "Primary" },
-	{ color: "#f7fabf", label: "Secondary" },
-	{ color: "#ffffff", label: "Tertiary / Residential", border: true },
-	{ color: "#ededed", label: "Living Street" },
-	{ color: "#ffffff", label: "Service", thin: true, border: true },
-	{ color: "#ff6666", label: "Footway / Steps", dashed: true },
-	{ color: "#5555ff", label: "Cycleway", dashed: true },
-	{ color: "#776a6a", label: "Path", dashed: true },
-	{ color: "#996633", label: "Track", dashed: true },
+	{ color: "#0055CC", label: "Motorway (Blue)", width: 4 },
+	{ color: "#8B008B", label: "Trunk (Purple)", width: 3.5 },
+	{ color: "#FF8C00", label: "Primary (Orange)", width: 3 },
+	{ color: "#008B8B", label: "Secondary (Teal)", width: 2.5 },
+	{ color: "#C71585", label: "Tertiary (Pink)", width: 2 },
+	{ color: "#4B5563", label: "Residential (Dark Gray)", width: 2 },
+	{ color: "#374151", label: "Living Street (Darker)", width: 2 },
+	{ color: "#9CA3AF", label: "Service (Light Gray)", width: 1.5 },
+	{ color: "#4B0082", label: "Footway / Steps", dashed: true },
+	{ color: "#20B2AA", label: "Cycleway", dashed: true },
+	{ color: "#9370DB", label: "Path", dashed: true },
+	{ color: "#B8860B", label: "Track", dashed: true },
 ]
 
 export function MapLegend() {
@@ -82,23 +83,14 @@ export function MapLegend() {
 							{ROAD_LEGEND.map((item) => (
 								<div key={item.label} className="flex items-center gap-2">
 									<div className="w-6 flex items-center justify-center">
-										<svg width="24" height="6" viewBox="0 0 24 6">
+										<svg width="24" height="8" viewBox="0 0 24 8">
 											<line
-												x1="0" y1="3" x2="24" y2="3"
+												x1="0" y1="4" x2="24" y2="4"
 												stroke={item.color}
-												strokeWidth={item.thin ? 1.5 : 3}
+												strokeWidth={item.width || 3}
 												strokeDasharray={item.dashed ? "4 3" : undefined}
 												strokeLinecap="round"
 											/>
-											{item.border && (
-												<line
-													x1="0" y1="3" x2="24" y2="3"
-													stroke="#999"
-													strokeWidth={item.thin ? 2.5 : 4}
-													strokeLinecap="round"
-													opacity={0.3}
-												/>
-											)}
 										</svg>
 									</div>
 									<span className="text-[11px] text-zinc-400">{item.label}</span>

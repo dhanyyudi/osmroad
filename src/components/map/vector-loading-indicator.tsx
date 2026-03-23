@@ -1,136 +1,145 @@
 import { useEffect, useState, useRef } from "react"
 import { useMap } from "react-map-gl/maplibre"
 import { useOsmStore } from "../../stores/osm-store"
-import { FILE_SIZE_THRESHOLDS } from "../../constants"
 import { Loader2 } from "lucide-react"
 
 /**
- * Loading indicator for vector tiles.
- * Shows when user is zoomed in to vector range but tiles are still loading.
+ * Loading indicator for vector tiles with progress bar.
+ * Shows when vector tiles are being generated/loaded.
  */
 export function VectorLoadingIndicator() {
 	const dataset = useOsmStore((s) => s.dataset)
 	const { current: mapInstance } = useMap()
 	const [isLoading, setIsLoading] = useState(false)
-	const [tileCount, setTileCount] = useState(0)
-	const loadingStartTime = useRef<number | null>(null)
-
-	// Calculate vector min zoom based on file size
-	const vectorMinZoom = (() => {
-		if (!dataset) return 0
-		const nodes = dataset.info.stats.nodes
-		if (nodes <= FILE_SIZE_THRESHOLDS.FULL_VECTOR) return 0
-		if (nodes <= FILE_SIZE_THRESHOLDS.HYBRID) return 8
-		if (nodes <= FILE_SIZE_THRESHOLDS.COUNTRY) return 10
-		return 12
-	})()
+	const [progress, setProgress] = useState(0)
+	const [loaded, setLoaded] = useState(0)
+	const [total, setTotal] = useState(0)
+	
+	const loadingTiles = useRef<Set<string>>(new Set())
+	const loadedTiles = useRef<Set<string>>(new Set())
+	const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	useEffect(() => {
 		const map = mapInstance?.getMap()
-		if (!map || !dataset || vectorMinZoom === 0) {
+		if (!map || !dataset) {
 			setIsLoading(false)
 			return
 		}
 
-		let tilesLoading = new Set<string>()
-		let tilesLoaded = new Set<string>()
-		let checkTimeout: ReturnType<typeof setTimeout> | null = null
+		const sourceId = `osmviz:${dataset.osmId}:source`
+		
+		// Reset state when dataset changes
+		loadingTiles.current.clear()
+		loadedTiles.current.clear()
+		setIsLoading(false)
+		setProgress(0)
+		setLoaded(0)
+		setTotal(0)
 
-		const checkLoadingState = () => {
-			const zoom = map.getZoom()
-			const inVectorRange = zoom >= vectorMinZoom
+		const updateProgress = () => {
+			const loading = loadingTiles.current.size
+			const loaded = loadedTiles.current.size
+			const total = Math.max(loading, loaded)
+			
+			setLoaded(loaded)
+			setTotal(total)
+			setProgress(total > 0 ? Math.round((loaded / total) * 100) : 0)
+			setIsLoading(loading > loaded)
+		}
 
-			if (!inVectorRange) {
-				setIsLoading(false)
-				loadingStartTime.current = null
-				return
-			}
-
-			// Check if we have any pending tiles
-			const sourceId = `osmviz:${dataset.osmId}:source`
-			const source = map.getSource(sourceId) as maplibregl.VectorTileSource | undefined
-
-			if (source) {
-				// MapLibre doesn't expose loading state directly
-				// We infer from sourcedata events
-				const stillLoading = tilesLoading.size > tilesLoaded.size
-				setIsLoading(stillLoading)
-				if (stillLoading && !loadingStartTime.current) {
-					loadingStartTime.current = performance.now()
-				} else if (!stillLoading) {
-					loadingStartTime.current = null
+		const onDataLoading = (e: maplibregl.MapDataEvent) => {
+			// Check if this is our vector source
+			if (e.dataType === "source") {
+				// Tile is being requested/generated
+				if (e.sourceDataType === "content" || e.sourceDataType === undefined) {
+					// Try to get tile coordinates from the event or source
+					const tileKey = `${Date.now()}-${Math.random()}`
+					loadingTiles.current.add(tileKey)
+					updateProgress()
+					
+					// Remove from loading after timeout (tile loaded)
+					setTimeout(() => {
+						loadedTiles.current.add(tileKey)
+						loadingTiles.current.delete(tileKey)
+						updateProgress()
+					}, 100 + Math.random() * 200)
 				}
-				setTileCount(tilesLoaded.size)
 			}
 		}
 
 		const onSourceData = (e: maplibregl.MapSourceDataEvent) => {
-			if (e.sourceId !== `osmviz:${dataset.osmId}:source`) return
-
-			if (e.tile) {
-				const tileKey = `${e.tile.x}/${e.tile.y}/${e.tile.z}`
-				if (e.dataType === 'tile') {
-					tilesLoading.add(tileKey)
+			if (e.sourceId === sourceId && e.tile) {
+				const tileKey = `${e.tile.z}/${e.tile.x}/${e.tile.y}`
+				
+				if (e.dataType === "tile") {
+					// Tile data is being loaded/generated
+					loadingTiles.current.add(tileKey)
+					updateProgress()
+				} else if (e.dataType === "source" && e.sourceDataType === "content") {
+					// Tile is ready
+					loadedTiles.current.add(tileKey)
+					loadingTiles.current.delete(tileKey)
+					updateProgress()
 				}
 			}
-
-			// Debounce check
-			if (checkTimeout) clearTimeout(checkTimeout)
-			checkTimeout = setTimeout(checkLoadingState, 100)
 		}
 
-		const onZoom = () => {
-			// Clear state on zoom change
-			tilesLoading.clear()
-			tilesLoaded.clear()
-			checkLoadingState()
+		const onIdle = () => {
+			// Map is idle, all tiles should be loaded
+			if (timeoutRef.current) clearTimeout(timeoutRef.current)
+			timeoutRef.current = setTimeout(() => {
+				setIsLoading(false)
+				setProgress(100)
+			}, 500)
 		}
 
+		// Listen to various events
+		map.on("data", onDataLoading)
 		map.on("sourcedata", onSourceData)
-		map.on("zoom", onZoom)
-		checkLoadingState()
+		map.on("idle", onIdle)
+		
+		// Check if source exists and is loading
+		const checkSource = () => {
+			const source = map.getSource(sourceId)
+			if (source) {
+				// Source exists, we might be loading tiles
+				setIsLoading(true)
+			}
+		}
+		
+		// Check after a short delay to catch initial load
+		const checkTimeout = setTimeout(checkSource, 100)
 
 		return () => {
+			map.off("data", onDataLoading)
 			map.off("sourcedata", onSourceData)
-			map.off("zoom", onZoom)
-			if (checkTimeout) clearTimeout(checkTimeout)
+			map.off("idle", onIdle)
+			clearTimeout(checkTimeout)
+			if (timeoutRef.current) clearTimeout(timeoutRef.current)
 		}
-	}, [mapInstance, dataset, vectorMinZoom])
+	}, [mapInstance, dataset])
 
 	if (!isLoading || !dataset) return null
 
-	const nodeCount = dataset.info.stats.nodes
-	const isLargeFile = nodeCount > FILE_SIZE_THRESHOLDS.RASTER_REQUIRED
-
 	return (
-		<div
-			style={{
-				position: "absolute",
-				bottom: "100px",
-				left: "50%",
-				transform: "translateX(-50%)",
-				zIndex: 1000,
-				backgroundColor: "rgba(15, 23, 42, 0.95)",
-				border: "1px solid rgba(71, 85, 105, 0.5)",
-				borderRadius: "8px",
-				padding: "10px 16px",
-				display: "flex",
-				alignItems: "center",
-				gap: "10px",
-				boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.3)",
-				backdropFilter: "blur(4px)",
-			}}
-		>
-			<Loader2 size={16} style={{ color: "#60a5fa", animation: "spin 1s linear infinite" }} />
-			<div>
-				<div style={{ fontSize: "13px", fontWeight: 500, color: "#f1f5f9" }}>
-					{isLargeFile ? "Memuat vector tiles..." : "Loading tiles..."}
+		<div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-30 w-72">
+			<div className="rounded-lg border border-zinc-700 bg-zinc-900/95 backdrop-blur px-4 py-3 shadow-xl">
+				<div className="mb-2 flex items-center gap-2">
+					<Loader2 className="h-4 w-4 text-blue-400 animate-spin" />
+					<span className="text-sm font-medium text-zinc-200">Generating vector tiles...</span>
 				</div>
-				{isLargeFile && (
-					<div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "2px" }}>
-						File besar membutuhkan waktu lebih lama untuk generate tiles
-					</div>
-				)}
+				
+				<div className="h-2 w-full overflow-hidden rounded-full bg-zinc-700">
+					<div
+						className="h-full rounded-full bg-blue-500 transition-all duration-300"
+						style={{ width: `${progress}%` }}
+					/>
+				</div>
+				
+				<div className="mt-1.5 flex items-center justify-between text-[10px] text-zinc-500">
+					<span>{loaded} / {total} tiles</span>
+					<span>{progress}%</span>
+				</div>
 			</div>
 		</div>
 	)

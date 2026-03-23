@@ -1,24 +1,67 @@
-import { useCallback, useState } from "react"
+import { useCallback, useState, useEffect } from "react"
 import { FileDropZone } from "../shared/file-drop-zone"
 import { ProgressBar } from "../shared/progress-bar"
+import { ReloadDialog } from "../shared/reload-dialog"
 import { useOsmStore } from "../../stores/osm-store"
 import { useUIStore } from "../../stores/ui-store"
 import { useOsm } from "../../hooks/use-osm"
 import { osmXmlToGeoJSON, formatBbox, calculateBboxAreaKm2 } from "../../lib/osm-xml-parser"
-import { FileText, MapPin, Route, GitBranch, MapPinned, SquareDashedMousePointer, Loader2, X, Check, Zap, ArrowRight, Lock } from "lucide-react"
+import { 
+	saveDatasetMetadata, 
+	getLastDataset,
+	type CachedDataset 
+} from "../../lib/storage"
+import { FileText, MapPin, Route, GitBranch, MapPinned, SquareDashedMousePointer, Loader2, X, Check, Zap, ArrowRight, Lock, ChevronDown } from "lucide-react"
 
-// Sample data - Denpasar only (roads/highway only, filtered)
-const SAMPLE_FILE = {
-	name: "Denpasar, Bali",
-	url: "/samples/denpasar.osm.pbf",
-	description: "Denpasar roads only (~5 MB)",
-	format: "pbf" as const,
+// Sample datasets - Multiple regions for capacity demonstration
+interface SampleFile {
+	name: string
+	url: string
+	description: string
+	format: "pbf"
+	region: string
+	flag: string
+	size: string
+	downloadedOn: string
 }
+
+const SAMPLE_FILES: SampleFile[] = [
+	{
+		name: "Bali Island",
+		url: "/samples/bali-island-roads.osm.pbf",
+		description: "Complete Bali road network",
+		format: "pbf",
+		region: "indonesia",
+		flag: "ID",
+		size: "~14 MB",
+		downloadedOn: "23 March 2026",
+	},
+	{
+		name: "Singapore",
+		url: "/samples/singapore-roads.osm.pbf",
+		description: "Singapore full road network",
+		format: "pbf",
+		region: "singapore",
+		flag: "SG",
+		size: "~14 MB",
+		downloadedOn: "23 March 2026",
+	},
+	{
+		name: "Chinese Taipei",
+		url: "/samples/chinese-taipei-roads.osm.pbf",
+		description: "Taipei city roads",
+		format: "pbf",
+		region: "taiwan",
+		flag: "TW",
+		size: "~71 MB",
+		downloadedOn: "23 March 2026",
+	},
+]
 
 // Overpass API endpoint
 const OVERPASS_API = "https://overpass-api.de/api/interpreter"
 
-// Maximum allowed area (km²) to prevent timeout
+// Maximum allowed area (km) to prevent timeout
 const MAX_AREA_KM2 = 10
 const OVERPASS_TIMEOUT_MS = 90000 // 90 seconds
 
@@ -33,11 +76,55 @@ export function FilePanel() {
 	
 	const [overpassLoading, setOverpassLoading] = useState(false)
 	const [downloadSuccess, setDownloadSuccess] = useState(false)
+	const [showAllSamples, setShowAllSamples] = useState(false)
+	const [loadingSample, setLoadingSample] = useState<string | null>(null)
+	
+	// Reload dialog state
+	const [showReloadDialog, setShowReloadDialog] = useState(false)
+	const [cachedDataset, setCachedDataset] = useState<CachedDataset | null>(null)
+	const [pendingSampleFile, setPendingSampleFile] = useState<SampleFile | null>(null)
+
+	// Check for cached data on mount
+	useEffect(() => {
+		const checkCachedData = async () => {
+			if (dataset) return // Don't show if already loaded
+			
+			const lastDataset = await getLastDataset()
+			if (lastDataset) {
+				// Check if it's a sample file
+				const matchingSample = SAMPLE_FILES.find(s => 
+					lastDataset.fileUrl?.includes(s.url) || 
+					lastDataset.fileName.includes(s.region)
+				)
+				
+				if (matchingSample) {
+					setCachedDataset(lastDataset)
+					setPendingSampleFile(matchingSample)
+					setShowReloadDialog(true)
+				}
+			}
+		}
+		
+		checkCachedData()
+	}, [dataset])
+	
+	// Save dataset metadata when loaded
+	useEffect(() => {
+		if (dataset) {
+			saveDatasetMetadata({
+				id: dataset.osmId,
+				fileName: dataset.fileName,
+				cachedAt: Date.now(),
+				fileSize: 0, // Will be updated if available
+				stats: dataset.info.stats,
+				bbox: dataset.info.bbox,
+			})
+		}
+	}, [dataset])
 
 	const handleFile = useCallback(
 		async (file: File) => {
 			if (!remote) return
-			// Prevent upload if file already loaded
 			if (useOsmStore.getState().dataset) {
 				console.log("[FilePanel] Upload blocked: file already loaded")
 				return
@@ -62,41 +149,43 @@ export function FilePanel() {
 		[remote, setActiveTab],
 	)
 
-	const loadSample = useCallback(async () => {
+	const loadSample = useCallback(async (sampleFile: SampleFile) => {
 		if (!remote) return
-		// Prevent upload if file already loaded
 		if (useOsmStore.getState().dataset) {
 			console.log("[FilePanel] Sample load blocked: file already loaded")
 			return
 		}
+		setLoadingSample(sampleFile.name)
 		const store = useOsmStore.getState()
 		store.setLoading(true)
 		store.setError(null)
 		try {
-			const response = await fetch(SAMPLE_FILE.url)
+			const response = await fetch(sampleFile.url)
 			if (!response.ok) {
 				throw new Error(`Failed to download: ${response.statusText}`)
 			}
 			const blob = await response.blob()
-			const file = new File([blob], "denpasar_sample.osm.pbf", {
+			const fileName = sampleFile.url.split('/').pop() || `${sampleFile.region}_sample.osm.pbf`
+			const file = new File([blob], fileName, {
 				type: "application/octet-stream",
 			})
-			const result = await remote.fromPbf(file, { id: file.name })
+			const result = await remote.fromPbf(file, { id: fileName })
 			store.setDataset({
 				osmId: result.id,
 				info: result,
-				fileName: file.name,
+				fileName: fileName,
 			})
 			store.setLoading(false)
 			store.setProgress(null)
 			setActiveTab("inspect")
 		} catch (err) {
 			store.setError(String(err))
+		} finally {
+			setLoadingSample(null)
 		}
 	}, [remote, setActiveTab])
 
 	const startDrawingMode = useCallback(() => {
-		// Prevent drawing mode if file already loaded
 		if (useOsmStore.getState().dataset) {
 			console.log("[FilePanel] Drawing mode blocked: file already loaded")
 			return
@@ -113,7 +202,6 @@ export function FilePanel() {
 	const downloadFromOverpass = useCallback(async () => {
 		if (!remote || !drawnBbox) return
 
-		// Check area size
 		const areaKm2 = calculateBboxAreaKm2(
 			drawnBbox.minLon,
 			drawnBbox.minLat,
@@ -125,7 +213,7 @@ export function FilePanel() {
 			useOsmStore
 				.getState()
 				.setError(
-					`Area too large (${areaKm2.toFixed(1)} km²). Max allowed: ${MAX_AREA_KM2} km². Please draw a smaller area (about 2-5 km² works best).`,
+					`Area too large (${areaKm2.toFixed(1)} km). Max allowed: ${MAX_AREA_KM2} km. Please draw a smaller area (about 2-5 km works best).`,
 				)
 			return
 		}
@@ -137,13 +225,10 @@ export function FilePanel() {
 		store.setError(null)
 
 		try {
-			// Optimized Overpass QL query - use 'out geom' for full geometry
-			// This is more efficient than 'node(w); out meta' which downloads all nodes separately
 			const query = `[bbox:${drawnBbox.minLat},${drawnBbox.minLon},${drawnBbox.maxLat},${drawnBbox.maxLon}];
 way["highway"];
 out geom;`
 
-			// Fetch from Overpass API with timeout
 			const controller = new AbortController()
 			const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS)
 			
@@ -158,21 +243,18 @@ out geom;`
 
 			if (!response.ok) {
 				if (response.status === 504) {
-					throw new Error("Overpass API timeout. Area too large or too complex. Try a smaller area (2-3 km²).")
+					throw new Error("Overpass API timeout. Area too large or too complex. Try a smaller area (2-3 km).")
 				}
 				throw new Error(`Overpass API error: ${response.statusText}`)
 			}
 
 			const osmXml = await response.text()
-
-			// Parse OSM XML to GeoJSON
 			const geojson = osmXmlToGeoJSON(osmXml)
 
 			if (geojson.features.length === 0) {
 				throw new Error("No roads found in selected area. Try a larger area.")
 			}
 
-			// Load GeoJSON directly using fromGeoJSON
 			const fileName = `roads_${drawnBbox.minLon.toFixed(2)}_${drawnBbox.minLat.toFixed(2)}.geojson`
 			const result = await remote.fromGeoJSON(
 				new File([JSON.stringify(geojson)], fileName, { type: "application/geo+json" }),
@@ -204,8 +286,8 @@ out geom;`
 		}
 	}, [remote, drawnBbox, clearDrawnBbox, setDrawingMode, setActiveTab])
 
-	// Lock state: prevent upload if file already loaded
 	const isLocked = !!dataset
+	const displayedSamples = showAllSamples ? SAMPLE_FILES : SAMPLE_FILES.slice(0, 1)
 
 	return (
 		<div className="flex flex-col gap-4 p-4">
@@ -230,9 +312,8 @@ out geom;`
 				disabled={isLoading || !remote || isLocked}
 			/>
 
-			{/* Sample Data Section - Prominent Quick Start */}
+			{/* Sample Data Section - Multiple Regions */}
 			<div className={`relative overflow-hidden rounded-lg border border-blue-500/30 bg-gradient-to-br from-blue-900/30 via-zinc-800/50 to-zinc-800/50 p-3 ${isLocked ? 'opacity-50' : ''}`}>
-				{/* Quick Start Badge */}
 				<div className="absolute right-2 top-2">
 					<span className="inline-flex items-center gap-1 rounded-full bg-green-500/20 px-2 py-0.5 text-[10px] font-medium text-green-400">
 						<Zap className="h-3 w-3" />
@@ -245,31 +326,55 @@ out geom;`
 						<MapPinned className="h-4 w-4 text-blue-400" />
 					</div>
 					<div>
-						<span className="text-xs font-semibold text-zinc-200">Try Sample Data</span>
-						<p className="text-[10px] text-zinc-500">Instant demo, no setup needed</p>
+						<span className="text-xs font-semibold text-zinc-200">Sample Datasets</span>
+						<p className="text-[10px] text-zinc-500">Load pre-filtered road networks</p>
 					</div>
 				</div>
 				
-				<button
-					onClick={loadSample}
-					disabled={isLoading || !remote || isLocked}
-					className="group flex w-full items-center justify-between rounded-lg bg-blue-600/20 px-3 py-2.5 text-left text-xs transition-all hover:bg-blue-600/30 hover:shadow-lg hover:shadow-blue-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-				>
-					<div className="flex items-center gap-2">
-						<div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-500/20 group-hover:bg-blue-500/30 transition-colors">
-							<span className="text-xs">🇮🇩</span>
-						</div>
-						<div>
-							<div className="font-medium text-blue-300 group-hover:text-blue-200 transition-colors">{SAMPLE_FILE.name}</div>
-							<div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
-								<span>~5 MB</span>
-								<span className="text-zinc-600">•</span>
-								<span className="text-green-400/80">No download required</span>
-							</div>
-						</div>
-					</div>
-					<ArrowRight className="h-4 w-4 text-blue-400 transition-transform group-hover:translate-x-0.5" />
-				</button>
+				<div className="space-y-2">
+					{displayedSamples.map((sample) => (
+						<button
+							key={sample.region}
+							onClick={() => loadSample(sample)}
+							disabled={isLoading || !remote || isLocked || loadingSample === sample.name}
+							className="group flex w-full items-center justify-between rounded-lg bg-blue-600/20 px-3 py-2.5 text-left text-xs transition-all hover:bg-blue-600/30 hover:shadow-lg hover:shadow-blue-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+						>
+								<div className="flex items-center gap-2 flex-1 min-w-0">
+									<div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-500/20 group-hover:bg-blue-500/30 transition-colors shrink-0">
+										<span className="text-[10px] font-bold">{sample.flag}</span>
+									</div>
+									<div className="flex-1 min-w-0">
+										<div className="flex items-center gap-2 flex-wrap">
+											<div className="font-medium text-blue-300 group-hover:text-blue-200 transition-colors">{sample.name}</div>
+											<span className="inline-flex items-center rounded bg-zinc-700/50 px-1.5 py-0.5 text-[9px] text-zinc-400 shrink-0">
+												{sample.downloadedOn}
+											</span>
+										</div>
+										<div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+											<span>{sample.size}</span>
+											<span className="text-zinc-600">•</span>
+											<span className="text-zinc-400 truncate">{sample.description}</span>
+										</div>
+									</div>
+								</div>
+							{loadingSample === sample.name ? (
+								<Loader2 className="h-4 w-4 text-blue-400 animate-spin" />
+							) : (
+								<ArrowRight className="h-4 w-4 text-blue-400 transition-transform group-hover:translate-x-0.5" />
+							)}
+						</button>
+					))}
+				</div>
+
+				{SAMPLE_FILES.length > 1 && (
+					<button
+						onClick={() => setShowAllSamples(!showAllSamples)}
+						className="mt-2 flex w-full items-center justify-center gap-1 rounded-md py-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+					>
+						<span>{showAllSamples ? "Show less" : `Show ${SAMPLE_FILES.length - 1} more datasets`}</span>
+						<ChevronDown className={`h-3 w-3 transition-transform ${showAllSamples ? 'rotate-180' : ''}`} />
+					</button>
+				)}
 			</div>
 
 			{/* Download from OSM Section */}
@@ -282,7 +387,7 @@ out geom;`
 				{!isDrawingMode && !drawnBbox && (
 					<>
 						<p className="mb-2 text-[10px] text-zinc-500">
-							Draw a rectangle on the map (max {MAX_AREA_KM2} km², ~2-5 km² works best)
+							Draw a rectangle on the map (max {MAX_AREA_KM2} km, ~2-5 km works best)
 						</p>
 						<button
 							onClick={startDrawingMode}
@@ -301,7 +406,7 @@ out geom;`
 							<span className="text-xs font-medium">Drawing mode active...</span>
 						</div>
 						<p className="mt-1 text-[10px] text-blue-300/70">
-							Click and drag on the map. Tip: Smaller areas (~2-3 km²) load faster.
+							Click and drag on the map. Tip: Smaller areas (~2-3 km) load faster.
 						</p>
 						<button
 							onClick={cancelDrawing}
@@ -330,7 +435,7 @@ out geom;`
 										{formatBbox(drawnBbox)}
 									</div>
 									<div className={`text-[9px] ${isTooLarge ? 'text-red-400' : 'text-zinc-500'}`}>
-										Area: ~{areaKm2.toFixed(1)} km² {isTooLarge && `(max ${MAX_AREA_KM2} km²)`}
+										Area: ~{areaKm2.toFixed(1)} km {isTooLarge && `(max ${MAX_AREA_KM2} km)`}
 									</div>
 								</div>
 							)
@@ -379,10 +484,7 @@ out geom;`
 			</div>
 
 			{isLoading && progress && (
-				<ProgressBar
-					progress={0.5}
-					label={progress.msg ?? "Loading..."}
-				/>
+				<ProgressBar progress={progress} />
 			)}
 
 			{error && (
@@ -422,6 +524,27 @@ out geom;`
 					)}
 				</div>
 			)}
+
+			{/* Reload Dialog */}
+			<ReloadDialog
+				isOpen={showReloadDialog}
+				cachedDataset={cachedDataset}
+				onClose={() => {
+					setShowReloadDialog(false)
+					setPendingSampleFile(null)
+				}}
+				onReload={() => {
+					setShowReloadDialog(false)
+					if (pendingSampleFile) {
+						loadSample(pendingSampleFile)
+					}
+				}}
+				onLoadNew={() => {
+					setShowReloadDialog(false)
+					setCachedDataset(null)
+					// Don't load anything, let user choose
+				}}
+			/>
 		</div>
 	)
 }
