@@ -1,7 +1,6 @@
 import { Sidebar } from "./sidebar/sidebar"
 import { MapViewer } from "./map/map-viewer"
 import { BrowserWarning } from "./browser-warning"
-import { MobileControls } from "./map/mobile-controls"
 import { useUIStore } from "../stores/ui-store"
 import { useIsMobile } from "../hooks/use-media-query"
 
@@ -19,14 +18,11 @@ function DesktopLayout() {
 function MobileLayout() {
 	return (
 		<div className="flex flex-col h-full">
-			{/* Map takes full screen */}
+			{/* Map takes full screen — MobileControls rendered inside MapViewer (needs Map context) */}
 			<div className="flex-1 relative">
-				<MapViewer />
+				<MapViewer showMobileControls />
 			</div>
-			
-			{/* Floating controls overlay */}
-			<MobileControls />
-			
+
 			{/* Sidebar (renders as bottom sheet on mobile) */}
 			<Sidebar />
 		</div>

@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Map as MapIcon, ChevronDown } from "lucide-react"
 import { useUIStore } from "../../stores/ui-store"
 import { BASEMAP_OPTIONS } from "../../constants"
+import { useIsMobile } from "../../hooks/use-media-query"
 
 /** Inline color swatches for each basemap preview */
 const BASEMAP_PREVIEWS: Record<string, { bg: string; fg: string; lines?: string }> = {
@@ -36,10 +37,55 @@ function BasemapPreview({ id }: { id: string }) {
 
 export function BasemapSwitcher() {
 	const [open, setOpen] = useState(false)
+	const isMobile = useIsMobile()
 	const basemapId = useUIStore((s) => s.basemapId)
 	const setBasemapId = useUIStore((s) => s.setBasemapId)
 
 	const current = BASEMAP_OPTIONS.find((b) => b.id === basemapId)
+
+	if (isMobile) {
+		return (
+			<div className="absolute top-16 right-3 z-10">
+				{/* Compact icon button on mobile */}
+				<button
+					onClick={() => setOpen(!open)}
+					className="flex items-center gap-1.5 rounded-lg bg-zinc-900/90 backdrop-blur border border-zinc-700 px-2.5 py-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 shadow-lg transition-colors"
+					title={`Basemap: ${current?.label ?? "—"}`}
+				>
+					<MapIcon className="h-4 w-4 shrink-0" />
+					<span className="text-xs font-medium max-w-20 truncate">{current?.label ?? "—"}</span>
+					<ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+				</button>
+
+				{open && (
+					<div className="mt-1 w-64 rounded-lg bg-zinc-900/95 backdrop-blur border border-zinc-700 shadow-xl overflow-hidden right-0 absolute">
+						<div className="px-3 py-2 border-b border-zinc-700 flex items-center justify-between">
+							<span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Basemap</span>
+							<button onClick={() => setOpen(false)} className="text-zinc-400 hover:text-zinc-200">
+								<ChevronDown className="h-4 w-4 rotate-180" />
+							</button>
+						</div>
+						<div className="p-2 grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+							{BASEMAP_OPTIONS.map((opt) => (
+								<button
+									key={opt.id}
+									onClick={() => { setBasemapId(opt.id); setOpen(false) }}
+									className={`flex flex-col items-center gap-1 rounded-md p-1.5 transition-all ${
+										basemapId === opt.id ? "ring-2 ring-blue-500 bg-zinc-800" : "hover:bg-zinc-800 opacity-80 hover:opacity-100"
+									}`}
+								>
+									<div className="w-full aspect-square rounded overflow-hidden border border-zinc-700">
+										<BasemapPreview id={opt.id} />
+									</div>
+									<span className="text-[10px] text-zinc-400 leading-tight text-center truncate w-full">{opt.label}</span>
+								</button>
+							))}
+						</div>
+					</div>
+				)}
+			</div>
+		)
+	}
 
 	return (
 		<div className="absolute top-16 right-3 z-10 w-96">

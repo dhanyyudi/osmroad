@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react"
 import { Search, Loader2, MapPin } from "lucide-react"
+import { useIsMobile } from "../../hooks/use-media-query"
 
 interface GeocodingResult {
 	lat: number
@@ -8,6 +9,7 @@ interface GeocodingResult {
 }
 
 export function GeocodingOverlay() {
+	const isMobile = useIsMobile()
 	const [query, setQuery] = useState("")
 	const [results, setResults] = useState<GeocodingResult[]>([])
 	const [searching, setSearching] = useState(false)
@@ -70,7 +72,7 @@ export function GeocodingOverlay() {
 	}, [])
 
 	return (
-		<div className="absolute top-3 right-3 z-10 w-96">
+		<div className={`absolute z-10 ${isMobile ? "top-3 left-16 right-3" : "top-3 right-3 w-96"}`}>
 			{/* Search bar */}
 			<div className="flex gap-1.5 rounded-lg bg-zinc-900/95 p-1.5 backdrop-blur shadow-lg border border-zinc-700">
 				<div className="relative flex-1">

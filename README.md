@@ -1,131 +1,163 @@
-# OSMRoad 🗺️
+# OSMRoad
 
 **Browser-based OSM Road Network Visualizer — Visualize, inspect, and analyze OpenStreetMap road networks**
 
-Load `.osm.pbf` files directly in your browser to visualize, inspect, and analyze OpenStreetMap road networks. No server required — everything runs client-side using Web Workers and WebAssembly.
+Load `.osm.pbf` files directly in your browser. No server required — everything runs client-side using Web Workers and WebAssembly.
 
-## 🎬 Demo
+Visit **[osmroad.vercel.app](https://osmroad.vercel.app)** to try it now.
 
-<video src="https://github.com/user-attachments/assets/4003286d-0a92-4d5c-8e08-1163a5bd989b" loop muted playsinline width="100%"></video>
+---
 
-**Quick demo:** Upload video directly to GitHub issue/comment and copy the generated URL above.
+## Features
 
-Or visit **[osmroad.vercel.app](https://osmroad.vercel.app)** to try it now!
+### Core Map
 
-<details>
-<summary>📋 Demo Features</summary>
-
-- Loading large datasets (24M+ nodes, 2.8M+ roads) — Thailand example
-- Interactive road visualization with color-coded highways
-- AI-powered natural language queries with local fallback
-- Node and way editing (tags)
-- Drawing area on map and downloading from Overpass API
-- Routing between two points with turn-by-turn directions
-
-</details>
-
-## 🌟 Features
-
-### Core
-
-- **📁 PBF File Loading** — Drag & drop `.osm.pbf` files, parsed entirely client-side via Web Workers
-- **🛣️ Road Visualization** — Color-coded highway classification (motorway, trunk, primary, secondary, etc.) with oneway arrows
-- **🔍 Interactive Inspection** — Click any road or node to view detailed OSM tags, coordinates, and Street View link
-- **🚦 Node Markers** — Traffic signals, stop signs, barriers, crossings with intuitive icons
-- **📍 Cursor Coordinates** — Real-time lat/lon display as you move your cursor over the map
-- **🔒 File Upload Lock** — One file at a time to prevent memory issues
-- **⚡ Memory Monitor** — Live memory usage indicator with warnings for large files
+- **PBF File Loading** — Drag & drop `.osm.pbf` files, parsed entirely client-side via Web Workers
+- **Road Visualization** — Color-coded highway classification (motorway → track) with oneway arrows and dashed lines
+- **Node Markers** — Traffic signals, stop signs, barriers, crossings with icons
+- **7 Basemaps** — Dark Matter, Positron, Voyager, OSM Standard, Dark, Light, No Basemap (auto light/dark theme)
+- **Cursor Coordinates** — Real-time lat/lon at bottom-left as you move the cursor
+- **Geocoding Search** — Search places via Nominatim or enter `lat,lon` directly to fly to location
+- **Street View** — Click any road/node → Inspect panel → "Open Street View" opens Google Maps in new tab
 
 ### Analysis
 
-- **🧭 Routing** — Click-to-route with turn-by-turn directions, distance, and estimated time
-- **🔎 Search** — Geocoding via Nominatim and entity search within loaded data
-- **🚫 Access Restrictions** — Visualize motor_vehicle=no, access=no, and barriers
-- **⚡ Speed Data** — CSV speed overlay support for traffic analysis
-- **🤖 AI Query Assistant** — Ask questions in natural language (English/Indonesian) to query road data. Works offline with local parser fallback!
+- **AI Query Assistant** — Ask questions in natural language (English/Indonesian). Bilingual, works offline with local parser fallback
+- **Turn-by-Turn Routing** — Click two points to route; shows distance, time, and road segments
+- **Entity Search** — Search by ID (`way/123`, `node/456`) or tag value (`highway=primary`)
+- **Access Restrictions Layer** — Visualize `motor_vehicle=no`, `access=no`, barriers
+- **Speed Data Overlay** — Load CSV speed data for traffic analysis
+- **Overpass API** — Draw bbox on map and fetch live OSM data from Overpass API
 
-### AI-Powered Queries (NEW!)
+### Editing & Export
 
-Ask questions about your OSM data in natural language:
-- "How many motorways?" / "Berapa jalan tol?"
-- "Show primary roads longer than 5km"
-- "Find roads without names"
-- "Average length of residential roads"
-- "Total length of all roads" / "Total panjang jalan"
+- **Tag Editing** — Edit OSM tags for nodes and ways directly in the browser
+- **PBF Export** — Download edited data back to `.osm.pbf` format
+- **Layer Toggle** — Show/hide roads, nodes, restrictions, access layers
 
-**Key Features:**
-- **Bilingual**: Supports English and Indonesian queries
-- **Offline Fallback**: When API unavailable, uses local parser (no internet needed)
-- **Smart Query Detection**: COUNT, SELECT, AGGREGATE queries handled differently
-- **Map Highlighting**: SELECT results highlighted in amber/yellow with auto-zoom
+### Performance & Memory
 
-### Data
+- **Smart Render Strategy** — Automatically selects full-vector / hybrid / raster render mode based on file size
+- **Memory Monitor** — Live memory usage with warnings at >80%
+- **File Upload Lock** — One file at a time to prevent memory issues
+- **Large File Support** — Files with 24M+ nodes handled via raster preview + vector tiles at high zoom
 
-- **✏️ Tag Editing** — Edit OSM tags directly in the browser (for both nodes and ways)
-- **📤 Export** — Download edited data back to PBF format
-- **🗺️ Multiple Basemaps** — Dark Matter, Positron, Voyager, OSM Standard, and more
-- **🌎 Street View Integration** — Click "Open Street View" in inspect panel to view location in Google Maps
+### Mobile
 
-## 🚀 Quick Start
+- **Responsive Layout** — Full-screen map on mobile with floating controls
+- **Bottom Sheet** — Draggable iOS-style panel (snap at 40%, 70%, 92%)
+- **Auto-Open on Click** — Tap a road → Inspect panel opens automatically (no need to open menu first)
+- **Mobile Controls** — Zoom +/-, geolocation, layers toggle at bottom-right
+- **Compact Basemap Switcher** — Icon + label button on mobile, full grid on desktop
 
-### Online (Recommended)
+---
 
-Visit **[osmroad.vercel.app](https://osmroad.vercel.app)** and start visualizing immediately!
+## Quick Start
+
+### Online
+
+Visit **[osmroad.vercel.app](https://osmroad.vercel.app)**
 
 ### Local Development
 
 ```bash
 npm install
 npm run dev
+# Open http://localhost:5173
 ```
 
-Open `http://localhost:5173` and drop an `.osm.pbf` file onto the map.
+---
 
-## 📖 How to Use
+## How to Use
 
 ### Loading OSM Data
 
-OSMRoad provides **3 ways** to load OSM data:
+Three ways to load data:
 
-1. **Upload Your Own PBF File** — Drag & drop your `.osm.pbf` file onto the map
-2. **Load Sample Data** — Click "Load Sample" for Denpasar, Bali data (~5 MB)
-3. **Download from OSM** — Draw area on map, fetch from Overpass API
+1. **Upload PBF** — Drag & drop `.osm.pbf` onto the map, or use the File panel
+2. **Sample Data** — Load built-in samples: Bali (~14MB), Singapore (~14MB), Taipei (~71MB)
+3. **Overpass API** — Draw a bounding box on the map → fetch live data from OSM
 
-**Note:** Large files (>50K roads) will use worker-based queries instead of DuckDB to prevent memory issues.
+> Large files (>50K roads) skip DuckDB sync and use worker-based streaming queries instead.
 
-### Using AI Query Assistant
+### AI Query Assistant
 
-1. Load OSM data (sample or your own)
-2. Wait for data to be ready ("Syncing..." message)
-3. Click the **✨ Sparkles** icon in the left sidebar (AI Query tab)
-4. Type your question in English or Indonesian:
-   - "How many primary roads?"
-   - "Berapa jalan tol?"
-   - "Show residential roads"
-   - "Total panjang jalan tol"
-5. Results are highlighted on the map in **amber/yellow** with auto-zoom (for SELECT queries)
+1. Load OSM data and wait for it to be ready
+2. Click the **Sparkles (AI)** icon in the sidebar
+3. Ask in English or Indonesian:
+   - `"How many motorways?"` / `"Berapa jalan tol?"`
+   - `"Show primary roads longer than 5km"`
+   - `"Total panjang semua jalan"`
+   - `"Average length of residential roads"`
+4. SELECT results are highlighted amber on the map with auto-zoom
 
-### Inspecting & Editing
+### Inspecting Roads & Nodes
 
-1. Click any road or node on the map
-2. View in the Inspect panel:
-   - Road/node type, name, and OSM tags
-   - **Coordinate** (lat/lon) with copy button
-   - **"Open Street View"** button to view in Google Maps
-3. Click "Edit Tags" to modify OSM tags
-4. Save changes (will be included in PBF export)
+- **Desktop**: Click any road or node → Inspect panel opens in sidebar
+- **Mobile**: Tap any road or node → bottom sheet opens automatically at 40% height (drag up for more)
+- Panel shows: type, ID, all OSM tags, coordinate (with copy), Street View button
 
-## 🛠️ Tech Stack
+### Routing
 
-- **[osmix](https://github.com/conveyal/osmix)** — OSM PBF parsing, spatial indexing, and routing (MIT)
-- **[MapLibre GL JS](https://maplibre.org/)** — Map rendering with vector tiles
-- **[React](https://react.dev/)** — UI framework
-- **[Vite](https://vite.dev/)** — Build tool
-- **[Tailwind CSS](https://tailwindcss.com/)** — Styling
-- **[DuckDB-wasm](https://duckdb.org/)** — In-browser SQL queries (for small files)
-- **[Comlink](https://github.com/GoogleChromeLabs/comlink)** — Web Worker communication
-- **[Google Vertex AI](https://cloud.google.com/vertex-ai)** — Gemini model for NL2SQL (with local fallback)
+1. Open the **Route** panel
+2. Click "Set Start" then click a point on the map
+3. Click "Set End" then click another point
+4. Route renders with distance and estimated time
 
-## 📝 License
+---
+
+## AI Query Details
+
+The AI assistant uses a two-step fallback:
+
+```
+User query
+    ↓
+Try Vertex AI API (/api/ai/query)
+    ↓ fails (404 / offline)
+Local NL2SQL parser (offline)
+    ↓
+Execute on:
+  Small files (<50K roads)  → DuckDB-wasm
+  Large files (>50K roads)  → Worker streaming (10K batches)
+    ↓
+Highlight results on map
+```
+
+Supported query types: COUNT, SELECT, AGGREGATE, GROUP BY — in English and Indonesian.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| UI | React 19 + Tailwind CSS v4 |
+| Map | MapLibre GL JS 5.x |
+| State | Zustand |
+| Build | Vite 6 |
+| OSM parsing | osmix + Comlink (Web Workers) |
+| SQL queries | DuckDB-wasm |
+| AI / NL2SQL | Google Vertex AI (Gemini 2.5 Flash) + local fallback |
+| Deployment | Vercel (static + serverless function) |
+| PWA | vite-plugin-pwa + Workbox |
+
+---
+
+## Environment Variables (optional)
+
+Server-side only (Vercel):
+
+```
+GOOGLE_SERVICE_ACCOUNT_JSON   Vertex AI service account credentials
+GOOGLE_CLOUD_PROJECT          GCP project ID
+VERTEX_AI_MODEL               Model name (default: gemini-2.5-flash)
+```
+
+Without these, the app uses the local NL2SQL parser — all features still work.
+
+---
+
+## License
 
 MIT © OSMRoad Contributors

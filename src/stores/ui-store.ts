@@ -34,6 +34,7 @@ export type DrawnBbox = {
 interface UIState {
 	activeTab: SidebarTab
 	sidebarOpen: boolean
+	mobilePanelOpen: boolean
 	layers: LayerVisibility
 	basemapId: string
 	legendOpen: boolean
@@ -43,6 +44,7 @@ interface UIState {
 	drawnBbox: DrawnBbox | null
 
 	setActiveTab: (tab: SidebarTab) => void
+	setMobilePanelOpen: (open: boolean) => void
 	toggleSidebar: () => void
 	toggleLayer: (layer: keyof LayerVisibility) => void
 	setBasemapId: (id: string) => void
@@ -56,6 +58,7 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
 	activeTab: "file",
 	sidebarOpen: true,
+	mobilePanelOpen: false,
 	layers: {
 		roads: true,
 		nodes: true,
@@ -71,6 +74,7 @@ export const useUIStore = create<UIState>((set) => ({
 	drawnBbox: null,
 
 	setActiveTab: (tab) => set({ activeTab: tab }),
+	setMobilePanelOpen: (open) => set({ mobilePanelOpen: open }),
 	toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 	toggleLayer: (layer) =>
 		set((s) => ({

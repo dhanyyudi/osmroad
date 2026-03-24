@@ -1,529 +1,380 @@
-# How OSMRoad Works 🗺️
+# How OSMRoad Works
 
-> A beginner-friendly explanation of the magic behind browser-based OSM visualization
+> Technical explanation of the browser-based OSM visualizer architecture
 
 ---
 
 ## The Big Picture
 
-Imagine you have a **giant encyclopedia** with millions of pages about every road in the world. That's basically what an OSM PBF file is — a massive database of roads, intersections, and geographic data.
-
-Now, the crazy part: **OSMRoad opens this encyclopedia directly in your browser**, without sending it to any server. How? Let's break it down.
+OSMRoad opens OSM PBF files (potentially gigabytes of road data) **directly in your browser** — no server, no backend. Everything runs client-side using Web Workers, WebAssembly, and GPU rendering.
 
 ---
 
-## 1. Loading Massive Data Files (The "How is this not crashing?" Section)
+## 1. Loading Massive Data Files
 
 ### The Problem
-OSM PBF files can be HUGE:
-- City-level: ~50-200 MB
-- Country-level: ~1-5 GB  
-- Full planet: ~70+ GB
 
-Your browser typically struggles with files larger than a few hundred MBs. So how do we handle this?
+OSM PBF files range from 50MB (city) to 5GB+ (country). Browsers struggle with large in-memory datasets.
 
-### The Solution: Smart Streaming + Indexing
+### Solution: Streaming + Spatial Indexing
 
-Think of it like this: instead of reading the entire encyclopedia cover-to-cover, we build a **super-smart table of contents** first.
+#### Web Workers (background threads)
 
-#### Step 1: Web Workers (The Helpful Assistants)
+All heavy lifting runs in a dedicated Web Worker (`osm.worker.ts`) via **Comlink** RPC. The main thread stays responsive while the worker:
+- Parses the PBF file
+- Builds spatial indices
+- Generates vector tiles
+- Processes queries
 
-**Tech: Web Workers + Comlink**
+#### Streaming Parser
 
-Imagine you're a librarian, and you have **invisible helpers** (Web Workers) who work in the background. While you're showing the map to users, these helpers are:
-- Parsing the PBF file
-- Building indexes
-- Preparing data
-
-They work in **parallel threads** (separate from the main browser), so the map stays smooth and responsive.
-
-#### Step 2: Streaming Parser (Reading as We Go)
-
-**Tech: osmix library**
-
-Instead of loading the entire file into memory (which would crash), we use a **streaming parser**:
+Uses **osmix** to parse PBF in chunks rather than loading the entire file first:
 
 ```
-Traditional way:  Download → Wait → Parse everything → Show
-Our way:         Download → Parse chunk 1 → Show → Parse chunk 2 → Show...
+Traditional:  Download → Load all → Parse → Display
+OSMRoad:      Download → Parse chunk → Display → Parse more…
 ```
 
-It's like watching a movie while it's still downloading — you don't need the whole file to start enjoying it.
+#### Spatial Index (R-tree)
 
-#### Step 3: Spatial Index (The GPS of Data)
+osmix builds an R-tree index for fast spatial lookups. Finding roads in a viewport takes milliseconds instead of scanning millions of records.
 
-**Tech: R-tree spatial indexing (via osmix)**
+#### Vector Tiles (show only what's visible)
 
-Imagine you have a map of Indonesia and want to find roads in Bali. Without an index, you'd have to check **every single road** in the database. With billions of roads, that's impossible!
+The custom `@osmix/vector` protocol generates vector tiles on-demand from the worker. MapLibre only requests tiles for the current viewport and zoom level — rendering stays fast regardless of total file size.
 
-Instead, we build an **R-tree index** — think of it as dividing the world into nested boxes:
+#### Smart Render Strategy
 
-```
-World
-├── Asia
-│   ├── Southeast Asia
-│   │   ├── Indonesia
-│   │   │   ├── Bali ✨ (found it!)
-│   │   │   └── Java
-```
+`file-size-detector.ts` picks a render mode based on node count:
 
-Now finding "roads near Bali" takes milliseconds instead of minutes.
+| File Size | Strategy |
+|-----------|---------|
+| < 500K nodes | Full vector at all zoom levels |
+| 500K – 2M nodes | Hybrid: raster 0–8, vector 8+ |
+| 2M – 10M nodes | Raster 0–10, vector 10+ |
+| > 10M nodes (country) | Raster 0–11, vector 12+ |
 
-#### Step 4: Vector Tiles (Only Show What's Visible)
+Max zoom is capped for large files to prevent tile overload.
 
-**Tech: MapLibre GL JS + Custom Vector Tile Protocol**
+#### Memory Management
 
-When you zoom into a city, you don't need to see roads in other countries. We use **vector tiles** — we only send the roads that are actually visible on your screen right now.
-
-It's like Google Maps: as you pan and zoom, new tiles load. But instead of downloading images, we download **raw road data** that gets rendered beautifully on your GPU.
-
-#### Step 5: Memory Management (Don't Crash the Browser!)
-
-**Tech: Dynamic throttling + Worker-based queries**
-
-For **large files** (Thailand-size with 24M+ nodes, 2.8M+ roads):
-- **Skip DuckDB sync** — Would use too much memory
-- **Use Worker queries** — Streaming batch processing (10K roads per batch)
-- **Max zoom limit** — Large files capped at zoom 12 to prevent tile overload
-- **Memory monitor** — Live memory usage display with warnings
-
-```
-Small files (<50K roads):  DuckDB + SQL queries
-Large files (>50K roads):  Worker streaming queries (no DuckDB)
-```
+- **Memory monitor** displays live usage and warns at >80%
+- Files >50K roads skip DuckDB sync (prevents memory spike)
+- LRU tile cache in worker (512 entries max)
+- Worker streaming queries process roads in 10K batches
 
 ---
 
-## 2. AI-Powered Natural Language Queries (UPDATED!)
+## 2. AI-Powered Natural Language Queries
 
-### The Problem
-SQL is powerful but intimidating. Most users don't know how to write:
-```sql
-SELECT highway, COUNT(*) FROM roads GROUP BY highway;
-```
-
-But they CAN ask: **"How many roads of each type are there?"**
-
-### The Solution: Natural Language to SQL (with Fallback!)
-
-**Tech: Google Vertex AI (Gemini) + Local Parser + DuckDB-wasm/Worker Queries**
-
-#### Architecture
+### Architecture
 
 ```
-┌─────────────┐    ┌──────────────────┐    ┌─────────────┐
-│   Browser   │ →  │  Vercel Server   │ →  │ Vertex AI   │
-│  (User)     │    │  (Edge Function) │    │ (Gemini)    │
-└─────────────┘    └──────────────────┘    └─────────────┘
-      │   ↓                                           │
-      │   └─────────── Local Parser Fallback ─────────┘
-      │                    ↓
-      └────────────────────┘
-               ↓
-   ┌─────────────────────────────┐
-   │ Small files: DuckDB-wasm    │
-   │ Large files: Worker queries │
-   └─────────────────────────────┘
+User query
+    │
+    ▼
+Try /api/ai/query (Vertex AI — Gemini 2.5 Flash)
+    │ fails (404, offline, rate-limit)
+    ▼
+Local NL2SQL parser (offline, rule-based)
+    │
+    ▼
+File size check
+    ├── < 50K roads → DuckDB-wasm SQL
+    └── > 50K roads → Worker streaming (10K/batch)
+    │
+    ▼
+Results + highlight on map
 ```
 
-#### How It Works
+### Vertex AI Path
 
-1. **User types question** (e.g., "berapa jalan tol?")
-2. **Try API first**: Send to Vertex AI via Vercel Edge Function
-3. **API fails?** (404, network error, etc.) → Fall back to **local parser**
-4. **Generate SQL**: `SELECT COUNT(*) as total FROM roads WHERE highway = 'motorway'`
-5. **Execute query**:
-   - Small files: DuckDB-wasm client-side SQL
-   - Large files: Worker streaming queries
-6. **Highlight on map**: Results shown in amber/yellow with auto-zoom
+`/api/ai/query` is a Vercel serverless function. It:
+1. Receives the user's natural language question
+2. Builds a prompt with schema context + 20+ few-shot examples
+3. Calls Gemini 2.5 Flash via Vertex AI
+4. Returns SQL
 
-#### Local Parser (Offline Support!)
+Service account credentials stay server-side only.
 
-When API unavailable, local parser handles common queries:
+### Local Parser Fallback
 
-| User Query | SQL Generated |
-|------------|---------------|
+`local-nl2sql.ts` handles common query patterns offline when the API is unavailable:
+
+| Query | Generated SQL |
+|-------|--------------|
 | "Berapa jalan tol?" | `SELECT COUNT(*) FROM roads WHERE highway = 'motorway'` |
-| "Tampilkan jalan utama" | `SELECT * FROM roads WHERE highway = 'primary'` |
-| "Total panjang jalan" | `SELECT SUM(length_meters) FROM roads` |
-| "Rata-rata panjang jalan tol" | `SELECT AVG(length_meters) FROM roads WHERE highway = 'motorway'` |
+| "Show primary roads" | `SELECT * FROM roads WHERE highway = 'primary'` |
+| "Total road length" | `SELECT SUM(length_meters) FROM roads` |
+| "Average residential length" | `SELECT AVG(length_meters) FROM roads WHERE highway = 'residential'` |
 
-**Supported query types:**
-- COUNT queries — "berapa", "count", "jumlah"
-- SELECT queries — "tampilkan", "show", "cari"
-- AGGREGATE queries — "total", "average", "rata-rata"
-- GROUP queries — "group by", "kelompokkan"
+Supports COUNT, SELECT, AGGREGATE, GROUP — English and Indonesian.
 
-#### Bilingual Support
+### Road Type Mapping (Bilingual)
 
-Both **English** and **Indonesian** are supported:
+| User Term | OSM Value |
+|-----------|---------|
+| "jalan tol" / "motorway" | `motorway` |
+| "jalan utama" / "primary road" | `primary` |
+| "jalan perumahan" / "residential" | `residential` |
+| "jalan setapak" / "footpath" | `footway` |
 
-| English | Indonesian | SQL Generated |
-|---------|-----------|---------------|
-| "How many motorways?" | "Berapa jalan tol?" | `SELECT COUNT(*) FROM roads WHERE highway = 'motorway'` |
-| "Show primary roads" | "Tampilkan jalan utama" | `SELECT * FROM roads WHERE highway = 'primary'` |
-| "Average road length" | "Rata-rata panjang jalan" | `SELECT AVG(length_meters) FROM roads` |
-| "Total length of roads" | "Total panjang jalan" | `SELECT SUM(length_meters) FROM roads` |
+### Map Highlighting
 
-#### Smart Query Detection
+Results from SELECT queries use MapLibre **feature state** (not layer recreation):
 
-The system detects query types and shows appropriate responses:
-- **COUNT** → Shows number (e.g., "Ditemukan 15 jalan tol")
-- **AGGREGATE** → Shows statistics (e.g., "avg_length: 1,234m")
-- **SELECT** → Highlights roads on map + auto-zoom
-
-#### Worker-Based Queries for Large Files
-
-For large files (>50K roads), we skip DuckDB and use worker streaming:
-
-```typescript
-// Process in batches to avoid memory issues
-for (let i = 0; i < roads.length; i += batchSize) {
-  const batch = roads.slice(i, i + batchSize)
-  const filtered = batch.filter(road => matchesFilter(road, filter))
-  results.push(...filtered)
-  
-  // Yield control for UI updates
-  if (batchNumber % 10 === 0) {
-    await new Promise(resolve => setTimeout(resolve, 0))
-  }
-}
+```javascript
+map.setFeatureState({ source, sourceLayer, id: zigzag(wayId) }, { highlighted: true })
 ```
 
-This allows querying files with millions of roads without crashing!
+Style expression checks the state:
+```javascript
+"line-color": ["case", ["boolean", ["feature-state", "highlighted"], false], "#fbbf24", roadColorExpr]
+```
+
+Benefits: 60fps, instant toggle, no re-render.
 
 ---
 
-## 3. Routing (Finding the Best Path)
+## 3. Routing
 
-### The Problem
-You click two points on the map. How does the app find the shortest/fastest route between them through potentially millions of roads?
+Uses **osmix built-in routing** (Dijkstra's algorithm):
 
-### The Solution: Dijkstra's Algorithm + Graph Theory
+1. User clicks start/end points on the map
+2. `findNearestRoutableNode()` snaps click to nearest routable node (within 200m radius)
+3. `route(osmId, fromNodeIndex, toNodeIndex)` runs Dijkstra on the road graph
+4. Result: coordinate array + segments (name, highway type, distance, time)
+5. Map flies to route bounds
 
-#### First, We Build a Graph
-
-Think of roads as **edges** and intersections as **nodes**:
-
-```
-    A ---- B
-    |      |
-    C ---- D ---- E
-```
-
-Each road segment knows:
-- How long it is (distance)
-- What type (highway, residential, etc.)
-- Speed limit
-- One-way or not
-
-#### Then, Dijkstra's Algorithm Finds the Way
-
-**Tech: osmix built-in routing**
-
-Imagine you're at point A and want to get to E. Dijkstra's algorithm works like this:
-
-1. Start at A. Mark distance = 0
-2. Look at all neighbors (B and C). Record distances
-3. Go to the closest unvisited node (say, B)
-4. From B, check its neighbors. If going through B to D is shorter than current known path, update it
-5. Repeat until reaching E
-
-It's like **spreading water** from the start point — it flows through all possible paths simultaneously, always taking the easiest route first.
-
-#### Why It's Fast
-
-Thanks to our **spatial index**, we don't search the whole world:
-1. Find roads near start point (fast with R-tree)
-2. Find roads near end point
-3. Run Dijkstra only in that area
-
-Instead of checking millions of roads, we might only check thousands.
+The graph is built from OSM way topology during file loading. Only nodes connected by `highway` ways are included. One-way streets are respected.
 
 ---
 
-## 4. Cursor Coordinates & Street View
+## 4. Mobile UI
 
-### The Problem
-Users want to know exact coordinates and see Street View of locations.
+### Layout
 
-### The Solution: Real-time Coordinate Display + Google Maps Integration
+```
+Desktop:                     Mobile:
+┌─────────┬──────────────┐   ┌────────────────┐
+│ Sidebar │              │   │   Map (full)   │
+│ (icon   │   MapViewer  │   │                │
+│ rail +  │              │   │  [≡] [search ]  │
+│ panel)  │              │   │         [Dark▼] │
+└─────────┴──────────────┘   │        [+][-]  │
+                              │        [⊙][≡] │
+                              └────────────────┘
+                              BottomSheet (slide up)
+```
 
-#### Cursor Coordinates
+### Responsive Detection
 
-As you move your mouse over the map:
-1. MapLibre converts **screen pixel** → **latitude/longitude** using `map.unproject()`
-2. Display updates in real-time at bottom-left corner
-3. Throttled to ~30fps for performance
+`use-media-query.ts` provides hooks:
+- `useIsMobile()` — viewport < 768px
+- `useIsTablet()` — 768–1024px
+- `useIsDesktop()` — > 1024px
 
-#### Street View Integration
+### Bottom Sheet
 
-When you click a road:
-1. Store the click coordinate (lat/lon) in `SelectedEntity`
-2. Inspect panel shows coordinate with **Copy** button
-3. **"Open Street View"** button generates Google Maps URL:
+`bottom-sheet.tsx` — iOS-style draggable sheet with:
+- Snap points: 40%, 70%, 92% of screen height
+- Touch drag handling (delta Y calculation)
+- Nearest snap point detection on release
+- Backdrop tap to dismiss
+- Initial snap at 40% (map still visible)
+
+### Auto-Open on Feature Click
+
+`mobilePanelOpen` state lives in `ui-store`. When user taps a road or node:
+1. `map-viewer.tsx` calls `setActiveTab("inspect")` + `setMobilePanelOpen(true)`
+2. Bottom sheet opens automatically at 40% height
+3. User can drag up to see more detail
+
+No need to open the hamburger menu first.
+
+### Geocoding Search Bar (Mobile)
+
+On mobile, search bar is positioned `top-3 left-16 right-3` to avoid overlapping the hamburger button (which is at `top-4 left-4`, 40px wide).
+
+### Basemap Switcher (Mobile)
+
+On mobile: compact button (icon + label, `w-auto`) at `top-16 right-3`.
+On desktop: full `w-96` panel.
+Dropdown anchors right-aligned to avoid overflow.
+
+### Mobile Controls
+
+Floating panel at bottom-right (inside `<Map>` context, required for `useMap()`):
+- **Zoom +/-** — stacked buttons
+- **Locate** — geolocation via `navigator.geolocation`
+- **Layers** — bottom sheet modal with toggle for roads/nodes/restrictions/access
+
+---
+
+## 5. Tag Editing
+
+1. User clicks road/node → entity selected in `osm-store`
+2. Edit panel shows current tags as editable key-value pairs
+3. Changes stored as diffs in memory (original data untouched)
+4. On export: osmix merges original + diffs → writes new PBF
+
+---
+
+## 6. Overpass API
+
+1. User enters draw mode (BBoxDrawLayer)
+2. Draws rectangle on map → `drawnBbox` stored in `ui-store`
+3. App constructs Overpass QL query:
    ```
-   https://www.google.com/maps/@lat,lon,3a,75y,0h,90t
+   [out:xml];
+   way["highway"](south,west,north,east);
+   out geom;
    ```
-4. Opens in new tab (not embedded — respects Google ToS)
+4. Response parsed by `osm-xml-parser.ts` → GeoJSON → loaded on map
+
+Capped at ~10km² to respect free Overpass service limits.
 
 ---
 
-## 5. Tag Editing (The "Save Changes" Feature)
+## 7. DuckDB-wasm Queries
 
-### The Problem
-OSM data is just a bunch of "tags" (key-value pairs) on roads and nodes:
-```
-highway=primary
-name=Jalan Sudirman
-maxspeed=60
-oneway=yes
-```
-
-How do we let users edit these and save them back?
-
-### The Solution: In-Memory Modification + PBF Export
-
-**Tech: Zustand (state management) + osmix PBF writer**
-
-#### Step 1: Track Changes in Memory
-
-When you click a road or node and edit its name, we don't modify the original file. Instead, we:
-1. Keep the original data in memory
-2. Store your changes separately ("diffs")
-3. Show the merged result on the map
-
-Think of it like **track changes in Word** — the original document stays intact, but you see your edits overlaid.
-
-#### Step 2: Export Modified PBF
-
-When you click "Export," we:
-1. Take the original PBF data
-2. Apply all your changes
-3. Write a brand new PBF file
-4. Download it to your computer
-
-**Tech stack:**
-- **Zustand**: Remembers what you changed
-- **osmix**: Knows how to write PBF format
-- **ArrayBuffer**: Efficient binary data handling
-
----
-
-## 6. Overpass API Integration (Fresh OSM Data)
-
-### The Problem
-What if users want data for an area they don't have a PBF file for?
-
-### The Solution: Live Query from OpenStreetMap
-
-**Tech: Overpass API + OSM XML Parser**
-
-#### How It Works
-
-1. You draw a rectangle on the map
-2. We convert that to coordinates (bounding box)
-3. Send query to Overpass API: "Give me all roads in this box"
-4. Receive OSM XML response
-5. Parse XML → Convert to GeoJSON → Load on map
-
-#### The Query Looks Like This
-
-```
-[out:xml];
-way["highway"](south,west,north,east);
-out geom;
-```
-
-Translation: "Find all ways with a 'highway' tag within these coordinates, and include their geometry."
-
-#### Why 10km² Limit?
-
-Overpass API is a free public service. If everyone downloaded country-sized data, it would crash. So we limit to ~10km² (about the size of a medium city district) to be nice to the servers.
-
----
-
-## 7. SQL Queries with DuckDB (The Power User Feature)
-
-### The Problem
-Power users want to ask complex questions:
-- "Show me all primary roads longer than 5km"
-- "Find intersections with traffic lights"
-- "Average road length by type"
-
-### The Solution: DuckDB-wasm (for small files)
-
-**Tech: DuckDB-wasm (SQLite for the browser)**
-
-DuckDB is like **Excel on steroids** that runs entirely in your browser. It can:
-- Query millions of rows in milliseconds
-- Run complex SQL queries
-- Join, filter, aggregate data
-
-#### How We Use It
-
-1. Load OSM data into DuckDB as tables (`roads`, `nodes`)
-2. User writes SQL query (or AI generates it)
-3. DuckDB executes it at native speed (WebAssembly)
-4. Results display on the map with highlight
-
-#### Example Query
+For small files (<50K roads), OSM data is synced to DuckDB:
 
 ```sql
-SELECT name, length_meters 
-FROM roads 
-WHERE highway = 'primary' 
-  AND length_meters > 5000
-ORDER BY length_meters DESC;
+CREATE TABLE roads (
+  id BIGINT,
+  name VARCHAR,
+  highway VARCHAR,
+  length_meters DOUBLE,
+  tags JSON
+);
 ```
 
-Translation: "Show me primary roads longer than 5km, sorted by length."
-
-#### Worker Queries for Large Files
-
-For files >50K roads, we skip DuckDB (would use too much memory):
-- Export roads from worker
-- Process in streaming batches (10K per batch)
-- Supports COUNT, FILTER, AGGREGATE operations
+Queries run at WebAssembly speed in the browser. The `useOsmDuckDBSync` hook handles the sync with a progress bar.
 
 ---
 
-## 8. Highlighting Query Results on Map
+## 8. PWA & Caching
 
-### The Problem
-After a query returns road IDs, how do we highlight them visually?
-
-### The Solution: MapLibre Feature State
-
-**Tech: MapLibre GL JS Feature State**
-
-Instead of recreating layers (slow), we use **feature state**:
-
-```javascript
-// Mark a road as highlighted
-map.setFeatureState(
-  { source, sourceLayer, id: zigzag(roadId) },
-  { highlighted: true }
-)
-```
-
-Then in the style expression:
-```javascript
-"line-color": [
-  "case",
-  ["boolean", ["feature-state", "highlighted"], false],
-  "#fbbf24",  // Amber for highlighted
-  roadColorExpression  // Default color
-]
-```
-
-**Benefits:**
-- No layer recreation → 60fps smooth
-- Instant color change
-- Easy to clear (just remove feature state)
-
-### Auto-Zoom
-
-When SELECT query returns results:
-1. Get geometries of all matching roads
-2. Calculate bounding box (min/max lat/lon)
-3. `map.fitBounds()` with padding
+`vite-plugin-pwa` + Workbox:
+- OSM tiles cached 7 days
+- Sample PBF files cached 30 days
+- App shell cached for offline use
+- Service worker skipped in dev mode (enabled after build only)
 
 ---
 
-## 9. File Upload Lock (Prevent User Errors)
+## Key Technical Constraints
 
-### The Problem
-Users might try to load multiple files simultaneously, causing:
-- Memory overflow
-- Confusing UI state
-- Worker conflicts
-
-### The Solution: Single File Mode
-
-**Tech: UI state management**
-
-Once a file is loaded:
-- Upload controls are **disabled**
-- Visual warning banner: "File upload locked — Refresh page to load new file"
-- All upload methods blocked (drag-drop, sample data, Overpass)
-
-This ensures one file at a time, preventing memory and state issues.
+| Constraint | Reason |
+|-----------|--------|
+| `target: "esnext"` in Vite | MapLibre 5.x uses native private class fields (`#field`) — must not be transpiled |
+| COOP/COEP headers | Required for `SharedArrayBuffer` (DuckDB-wasm needs it) |
+| MapLibre 5.x uses native API | `react-map-gl <Source>/<Layer>` incompatible with MapLibre 5 for GeoJSON — use `map.addSource()/addLayer()` directly |
+| `MobileControls` inside `<Map>` | `useMap()` hook requires a MapLibre `<Map>` ancestor in the React tree |
+| osmix patches | `postinstall` script patches osmix's vector tile relation handling |
 
 ---
 
-## Tech Stack Summary
+## File Structure
 
-| Problem | Solution | Tech Used |
-|---------|----------|-----------|
-| **Parsing huge files** | Streaming parser + Web Workers | osmix, Comlink |
-| **Fast spatial queries** | R-tree spatial index | osmix built-in |
-| **Smooth map rendering** | Vector tiles + GPU acceleration | MapLibre GL JS |
-| **Finding routes** | Graph algorithms | osmix routing (Dijkstra) |
-| **Remembering edits** | State management | Zustand |
-| **Exporting PBF** | Binary file writing | osmix PBF writer |
-| **Fresh OSM data** | API queries | Overpass API |
-| **Large file queries** | Streaming batch processing | Worker queries |
-| **Small file queries** | In-browser database | DuckDB-wasm |
-| **Natural language queries** | NL2SQL + Local Parser | Vertex AI + Rule-based |
-| **Worker communication** | Simplified RPC | Comlink |
-| **Coordinate display** | Real-time projection | MapLibre unproject |
-| **Memory management** | Dynamic throttling | Memory monitor, query routing |
+```
+src/
+├── components/
+│   ├── app.tsx                    # Root — desktop/mobile layout switch
+│   ├── map/
+│   │   ├── map-viewer.tsx         # MapLibre map, layer composition, click handlers
+│   │   ├── road-layer.tsx         # Road rendering (color/width by type, oneway, icons)
+│   │   ├── basemap-switcher.tsx   # Basemap selection (mobile compact / desktop full)
+│   │   ├── geocoding-overlay.tsx  # Search bar (Nominatim + lat,lon input)
+│   │   ├── mobile-controls.tsx    # Zoom, locate, layers toggle (mobile only)
+│   │   ├── cursor-coordinates.tsx # Real-time lat/lon display
+│   │   ├── memory-monitor.tsx     # Memory usage warning
+│   │   ├── vector-tiles-progress.tsx
+│   │   ├── access-layer.tsx       # access=no visualization
+│   │   ├── restriction-layer.tsx  # turn restriction visualization
+│   │   ├── speed-layer.tsx        # CSV speed overlay
+│   │   ├── route-layer.tsx        # Routing result path
+│   │   ├── search-highlight-layer.tsx
+│   │   └── bbox-draw-layer.tsx    # Overpass area drawing
+│   ├── sidebar/
+│   │   ├── sidebar.tsx            # Desktop icon-rail + mobile bottom sheet
+│   │   ├── file-panel.tsx         # Upload, samples, Overpass
+│   │   ├── ai-query-panel.tsx     # AI chat UI
+│   │   ├── inspect-panel.tsx      # Tags, coordinate, Street View
+│   │   ├── edit-panel.tsx         # Tag editing
+│   │   ├── routing-panel.tsx      # Route from/to
+│   │   ├── search-panel.tsx       # ID/tag search
+│   │   ├── layers-panel.tsx
+│   │   ├── speed-panel.tsx
+│   │   └── export-panel.tsx
+│   ├── ui/
+│   │   └── bottom-sheet.tsx       # Draggable mobile panel (snap 40/70/92%)
+│   └── ai-query/                  # Chat message, input, SQL preview components
+├── hooks/
+│   ├── use-media-query.ts         # Responsive breakpoints
+│   ├── use-osm.ts                 # Worker init + ETA
+│   ├── use-ai-query.ts            # AI query orchestration
+│   ├── use-osm-duckdb-sync.ts     # OSM → DuckDB sync
+│   ├── use-ai-map-highlight.ts    # Highlight + zoom
+│   ├── use-render-strategy.ts     # File size → render mode
+│   └── use-tile-loading.ts        # Tile progress
+├── stores/
+│   ├── osm-store.ts               # Dataset, selected entity, highlightedWayIds
+│   ├── ui-store.ts                # Tabs, layers, basemap, mobilePanelOpen, drawing mode
+│   ├── ai-query-store.ts          # Chat messages, SQL, history (localStorage)
+│   ├── routing-store.ts           # Route from/to/result
+│   ├── search-store.ts            # Search highlights
+│   └── speed-store.ts             # Speed profile data
+├── services/ai/
+│   ├── vertex-ai.ts               # API call + local fallback
+│   ├── local-nl2sql.ts            # Offline NL2SQL parser
+│   ├── prompt-builder.ts          # Few-shot prompt engineering
+│   └── guardrails.ts              # Input validation
+├── workers/
+│   ├── osm.worker.ts              # OsmixWorker + LRU tile cache + query methods
+│   ├── duckdb.worker.ts           # DuckDB-wasm init
+│   └── query-processor.ts        # Streaming batch processor (10K/batch)
+└── lib/
+    ├── osmix-vector-protocol.ts   # @osmix/vector tile protocol
+    ├── osmix-raster-protocol.ts   # Raster fallback protocol
+    ├── road-style.ts              # MapLibre style expressions
+    ├── file-size-detector.ts      # Render strategy selection
+    ├── map-utils.ts               # Coordinate format, Street View URL
+    ├── storage.ts                 # IndexedDB dataset caching
+    └── osm-xml-parser.ts          # OSM XML → GeoJSON (Overpass response)
+
+api/
+└── ai/query/index.js              # Vercel serverless — Vertex AI NL2SQL
+
+patches/
+└── fix-vt-relation-exclusion.js   # postinstall patch for osmix
+```
 
 ---
 
-## Why This Architecture?
+## Query Architecture Decision Tree
 
-### The Philosophy: Client-First
-
-Most mapping apps work like this:
 ```
-Browser → Server → Database → Response
-   ↑______________|
-        (slow!)
+User Query
+    ↓
+┌─────────────────────┐
+│ Try Vertex AI API   │── fails ──┐
+│ /api/ai/query       │           ▼
+└─────────────────────┘  ┌──────────────────┐
+         ↓ SQL            │ Local NL2SQL     │
+         ↓                │ (offline parser) │
+┌─────────────────────┐   └──────────────────┘
+│ File size?          │           ↓ SQL
+└──────────┬──────────┘           ↓
+  < 50K    │    > 50K         (same path)
+    ↓      │      ↓
+┌───────┐  │  ┌──────────────────┐
+│DuckDB │  │  │ Worker streaming │
+│ SQL   │  │  │ (10K batches)    │
+└───────┘  │  └──────────────────┘
+    ↓      │      ↓
+ Results ──┴── Results
+               ↓
+    Highlight amber on map + auto-zoom
 ```
-
-OSMRoad works like this:
-```
-Browser → Local processing → Done!
-   ↑______________|
-        (fast!)
-```
-
-By doing everything in the browser:
-- ✅ **Privacy**: Your data never leaves your computer
-- ✅ **Speed**: No network latency
-- ✅ **Offline**: Works without internet after initial load
-- ✅ **Free**: No server costs to pay
-- ✅ **Scalable**: Can handle files with millions of roads
-
-### The Trade-offs
-
-Of course, there are downsides:
-- ❌ **Limited by device RAM** (can't load planet-sized files)
-- ❌ **Initial load can be slow** (download big PBF first)
-- ❌ **Safari has limitations** (no SharedArrayBuffer support)
-- ❌ **AI queries need fallback** (API might be unavailable)
-
-But for most use cases — analyzing city or regional OSM data — it's perfect.
-
----
-
-## Conclusion
-
-OSMRoad is essentially a **mini-GIS workstation** that runs in your browser. It combines:
-- Database indexing (R-trees)
-- Graph algorithms (routing)
-- Binary parsing (PBF)
-- SQL processing (DuckDB + Worker queries)
-- Natural language processing (Vertex AI + Local parser)
-- GPU rendering (MapLibre)
-- Memory management (Dynamic throttling)
-
-All working together to let you explore OpenStreetMap data without installing anything or paying for servers.
-
-The magic is in **smart data structures** (not loading everything at once) and **modern web tech** (WebAssembly, Web Workers, AI APIs) that make the browser way more powerful than most people realize.
-
----
-
-**Want to dig deeper?** Check the source code in `src/` — it's organized by feature and heavily commented!

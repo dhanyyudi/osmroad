@@ -22,6 +22,7 @@ import { ZoomNotification } from "./zoom-notification"
 import { VectorLoadingIndicator } from "./vector-loading-indicator"
 import { MemoryMonitor } from "./memory-monitor"
 import { VectorTilesProgress } from "./vector-tiles-progress"
+import { MobileControls } from "./mobile-controls"
 // Protocol imports ensure they're registered at module load time
 import "../../lib/osmix-vector-protocol"
 import "../../lib/osmix-raster-protocol"
@@ -61,12 +62,13 @@ const EMPTY_STYLE: maplibregl.StyleSpecification = {
 	],
 }
 
-export function MapViewer() {
+export function MapViewer({ showMobileControls = false }: { showMobileControls?: boolean }) {
 	const mapRef = useRef<MapRef>(null)
 	const popupRef = useRef<Popup | null>(null)
 	const dataset = useOsmStore((s) => s.dataset)
 	const selectEntity = useOsmStore((s) => s.selectEntity)
 	const setActiveTab = useUIStore((s) => s.setActiveTab)
+	const setMobilePanelOpen = useUIStore((s) => s.setMobilePanelOpen)
 	const routingActive = useRoutingStore((s) => s.isActive)
 	const basemapId = useUIStore((s) => s.basemapId)
 	const setLegendOpen = useUIStore((s) => s.setLegendOpen)
@@ -274,8 +276,9 @@ export function MapViewer() {
 				lon: event.lngLat.lng,
 			})
 			setActiveTab("inspect")
+			setMobilePanelOpen(true)
 		},
-		[remote, dataset, selectEntity, setActiveTab, routingActive, handleRoutingClick],
+		[remote, dataset, selectEntity, setActiveTab, setMobilePanelOpen, routingActive, handleRoutingClick],
 	)
 
 	const handleMouseMove = useCallback(
@@ -366,6 +369,7 @@ export function MapViewer() {
 				<RouteLayer />
 				<SearchHighlightLayer />
 				<BBoxDrawLayer />
+				{showMobileControls && <MobileControls />}
 			</Map>
 			<CursorCoordinates />
 			<ZoomNotification />

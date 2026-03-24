@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { useUIStore, type SidebarTab } from "../../stores/ui-store"
 import { FilePanel } from "./file-panel"
 import { InspectPanel } from "./inspect-panel"
@@ -149,8 +148,8 @@ function MobileSidebar({
 			isOpen={isOpen}
 			onClose={onClose}
 			title={activeTab === "ai" ? "AI Query" : MAIN_TABS.find((t) => t.id === activeTab)?.label}
-			snapPoints={[30, 60, 90]}
-			initialSnap={1}
+			snapPoints={[40, 70, 92]}
+			initialSnap={0}
 		>
 			<div className="flex flex-col h-full">
 				{/* Tab selector for mobile */}
@@ -192,9 +191,8 @@ function MobileSidebar({
 }
 
 export function Sidebar() {
-	const { activeTab, sidebarOpen, setActiveTab, toggleSidebar } = useUIStore()
+	const { activeTab, sidebarOpen, setActiveTab, toggleSidebar, mobilePanelOpen, setMobilePanelOpen } = useUIStore()
 	const isMobile = useIsMobile()
-	const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
 	// Mobile layout
 	if (isMobile) {
@@ -202,7 +200,7 @@ export function Sidebar() {
 			<>
 				{/* Floating menu button */}
 				<button
-					onClick={() => setMobileMenuOpen(true)}
+					onClick={() => setMobilePanelOpen(true)}
 					className="fixed top-4 left-4 z-40 p-2.5 rounded-full bg-zinc-900/90 backdrop-blur border border-zinc-700 text-zinc-300 shadow-lg hover:bg-zinc-800 transition-colors"
 					aria-label="Open menu"
 				>
@@ -212,12 +210,9 @@ export function Sidebar() {
 				{/* Mobile bottom sheet */}
 				<MobileSidebar
 					activeTab={activeTab}
-					onTabChange={(tab) => {
-						setActiveTab(tab)
-						// Don't close - let user see the content
-					}}
-					isOpen={mobileMenuOpen}
-					onClose={() => setMobileMenuOpen(false)}
+					onTabChange={setActiveTab}
+					isOpen={mobilePanelOpen}
+					onClose={() => setMobilePanelOpen(false)}
 				/>
 			</>
 		)

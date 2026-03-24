@@ -1,19 +1,17 @@
 import { useState } from "react"
 import { useMap } from "react-map-gl/maplibre"
-import { 
-	Plus, 
-	Minus, 
+import {
+	Plus,
+	Minus,
 	Navigation,
 	X,
-	Map as MapIcon,
+	Layers,
 } from "lucide-react"
 import { useUIStore } from "../../stores/ui-store"
-import { BASEMAP_OPTIONS } from "../../constants"
 
 export function MobileControls() {
 	const { current: map } = useMap()
-	const { basemapId, setBasemapId, layers, toggleLayer } = useUIStore()
-	const [showBasemapMenu, setShowBasemapMenu] = useState(false)
+	const { layers, toggleLayer } = useUIStore()
 	const [showLayersMenu, setShowLayersMenu] = useState(false)
 
 	const handleZoomIn = () => {
@@ -26,7 +24,7 @@ export function MobileControls() {
 
 	const handleLocate = () => {
 		if (!map) return
-		
+
 		if (navigator.geolocation) {
 			navigator.geolocation.getCurrentPosition(
 				(position) => {
@@ -44,8 +42,6 @@ export function MobileControls() {
 			)
 		}
 	}
-
-
 
 	return (
 		<>
@@ -78,24 +74,9 @@ export function MobileControls() {
 					<Navigation className="h-5 w-5 text-blue-400" />
 				</button>
 
-				{/* Basemap Button */}
-				<button
-					onClick={() => {
-						setShowBasemapMenu(true)
-						setShowLayersMenu(false)
-					}}
-					className="p-3 rounded-xl bg-zinc-900/90 backdrop-blur border border-zinc-700 shadow-lg hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
-					aria-label="Change basemap"
-				>
-					<MapIcon className="h-5 w-5 text-zinc-300" />
-				</button>
-
 				{/* Layers Button */}
 				<button
-					onClick={() => {
-						setShowLayersMenu(true)
-						setShowBasemapMenu(false)
-					}}
+					onClick={() => setShowLayersMenu(true)}
 					className="p-3 rounded-xl bg-zinc-900/90 backdrop-blur border border-zinc-700 shadow-lg hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
 					aria-label="Toggle layers"
 				>
@@ -103,63 +84,19 @@ export function MobileControls() {
 				</button>
 			</div>
 
-			{/* Basemap Menu Modal */}
-			{showBasemapMenu && (
-				<div 
-					className="absolute inset-0 z-40 bg-black/50 flex items-end"
-					onClick={() => setShowBasemapMenu(false)}
-				>
-					<div 
-						className="w-full bg-zinc-900 rounded-t-2xl p-4 max-h-[60vh] overflow-y-auto"
-						onClick={(e) => e.stopPropagation()}
-					>
-						<div className="flex items-center justify-between mb-4">
-							<h3 className="text-sm font-semibold text-zinc-200">Basemap</h3>
-							<button 
-								onClick={() => setShowBasemapMenu(false)}
-								className="p-1 rounded-full hover:bg-zinc-800"
-							>
-								<X className="h-4 w-4 text-zinc-400" />
-							</button>
-						</div>
-						<div className="grid grid-cols-2 gap-2">
-							{BASEMAP_OPTIONS.map((basemap) => (
-								<button
-									key={basemap.id}
-									onClick={() => {
-										setBasemapId(basemap.id)
-										setShowBasemapMenu(false)
-									}}
-									className={`p-3 rounded-xl border text-left transition-colors ${
-										basemapId === basemap.id
-											? "border-blue-500 bg-blue-500/10"
-											: "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
-									}`}
-								>
-									<div className="text-xs font-medium text-zinc-200">{basemap.name}</div>
-									{basemapId === basemap.id && (
-										<div className="mt-1 text-[10px] text-blue-400">Active</div>
-									)}
-								</button>
-							))}
-						</div>
-					</div>
-				</div>
-			)}
-
 			{/* Layers Menu Modal */}
 			{showLayersMenu && (
-				<div 
+				<div
 					className="absolute inset-0 z-40 bg-black/50 flex items-end"
 					onClick={() => setShowLayersMenu(false)}
 				>
-					<div 
+					<div
 						className="w-full bg-zinc-900 rounded-t-2xl p-4"
 						onClick={(e) => e.stopPropagation()}
 					>
 						<div className="flex items-center justify-between mb-4">
 							<h3 className="text-sm font-semibold text-zinc-200">Layers</h3>
-							<button 
+							<button
 								onClick={() => setShowLayersMenu(false)}
 								className="p-1 rounded-full hover:bg-zinc-800"
 							>
