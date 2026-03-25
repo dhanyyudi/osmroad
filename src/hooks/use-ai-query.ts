@@ -54,57 +54,70 @@ function extractRoadType(sql: string): string | null {
 	return match ? match[1] : null
 }
 
+// Detect if a query is in Indonesian
+function isIndonesian(query: string): boolean {
+	const idKeywords = [
+		'berapa', 'jumlah', 'tampilkan', 'cari', 'daftar', 'semua', 'jalan', 'tol',
+		'rata-rata', 'panjang', 'terpanjang', 'terpendek', 'ada', 'yang', 'dengan',
+		'lebih', 'kurang', 'dari', 'per', 'tipe', 'statistik', 'jalur', 'trotoar',
+		'sepeda', 'perumahan', 'utama', 'sekunder', 'tersier', 'setapak', 'tanah',
+		'banyak', 'silakan', 'lihat', 'kelompokkan', 'masing',
+	]
+	const lower = query.toLowerCase()
+	return idKeywords.some(k => lower.includes(k))
+}
+
 // Format road type for display
-function formatRoadType(type: string | null): string {
-	if (!type) return 'jalan'
-	
-	const typeNames: Record<string, string> = {
-		'motorway': 'jalan tol',
-		'trunk': 'jalan trunk',
-		'primary': 'jalan utama',
-		'secondary': 'jalan sekunder',
-		'tertiary': 'jalan tersier',
-		'residential': 'jalan perumahan',
-		'service': 'jalan service',
-		'unclassified': 'jalan tak terklasifikasi',
-		'track': 'jalan tanah',
-		'path': 'jalur setapak',
-		'footway': 'trotoar',
-		'cycleway': 'jalur sepeda',
-		'steps': 'tangga',
+function formatRoadType(type: string | null, lang: 'en' | 'id'): string {
+	if (!type) return lang === 'id' ? 'jalan' : 'road'
+
+	const typeNames: Record<string, { en: string; id: string }> = {
+		'motorway': { en: 'motorway', id: 'jalan tol' },
+		'trunk': { en: 'trunk road', id: 'jalan trunk' },
+		'primary': { en: 'primary road', id: 'jalan utama' },
+		'secondary': { en: 'secondary road', id: 'jalan sekunder' },
+		'tertiary': { en: 'tertiary road', id: 'jalan tersier' },
+		'residential': { en: 'residential road', id: 'jalan perumahan' },
+		'service': { en: 'service road', id: 'jalan service' },
+		'unclassified': { en: 'unclassified road', id: 'jalan tak terklasifikasi' },
+		'track': { en: 'track', id: 'jalan tanah' },
+		'path': { en: 'path', id: 'jalur setapak' },
+		'footway': { en: 'footway', id: 'trotoar' },
+		'cycleway': { en: 'cycleway', id: 'jalur sepeda' },
+		'steps': { en: 'steps', id: 'tangga' },
 	}
-	
-	return typeNames[type] || type
+
+	return typeNames[type]?.[lang] ?? type
 }
 
 // Format result message based on query type with bilingual support
-function formatResultMessage(queryType: 'count' | 'aggregate' | 'select' | 'group', results: QueryResults, sql: string): string {
+function formatResultMessage(queryType: 'count' | 'aggregate' | 'select' | 'group', results: QueryResults, sql: string, prompt: string): string {
 	if (results.error) {
 		return `Query failed: ${results.error}`
 	}
 
-	const roadType = formatRoadType(extractRoadType(sql))
+	const lang = isIndonesian(prompt) ? 'id' : 'en'
+	const roadType = formatRoadType(extractRoadType(sql), lang)
 
 	if (queryType === 'count') {
 		// Extract count from result - DuckDB might return as 'total', 'count', 'count_star()', etc
 		const row = results.sampleData?.[0] as Record<string, number> | undefined
 		let count = 0
 		if (row) {
-			// Try different possible column names
 			count = row.total ?? row.count ?? row.count_star?.() ?? Object.values(row)[0] ?? 0
 		}
-		if (count === 0) {
-			return `Tidak ditemukan ${roadType}.`
+		if (lang === 'id') {
+			return count === 0 ? `Tidak ditemukan ${roadType}.` : `Ditemukan ${count} ${roadType}.`
 		}
-		return `Ditemukan ${count} ${roadType}.`
+		return count === 0 ? `No ${roadType} found.` : `Found ${count} ${roadType}.`
 	}
 
 	if (queryType === 'group') {
 		const count = results.rowCount
-		if (count === 0) {
-			return `Tidak ada data yang ditemukan.`
+		if (lang === 'id') {
+			return count === 0 ? `Tidak ada data yang ditemukan.` : `Menampilkan statistik untuk **${count}** kategori jalan.`
 		}
-		return `Menampilkan statistik untuk **${count}** kategori jalan.`
+		return count === 0 ? `No data found.` : `Showing statistics for **${count}** road categories.`
 	}
 
 	if (queryType === 'aggregate') {
@@ -115,7 +128,6 @@ function formatResultMessage(queryType: 'count' | 'aggregate' | 'select' | 'grou
 				.map(([key, value]) => {
 					const numVal = Number(value)
 					if (!isNaN(numVal)) {
-						// Format meters to km if large
 						if (numVal > 1000) {
 							return `${key}: ${(numVal / 1000).toFixed(2)} km`
 						}
@@ -124,19 +136,22 @@ function formatResultMessage(queryType: 'count' | 'aggregate' | 'select' | 'grou
 					return `${key}: ${value}`
 				})
 				.join(', ')
-			return `Hasil: ${entries}`
+			return lang === 'id' ? `Hasil: ${entries}` : `Result: ${entries}`
 		}
-		return `Query selesai dengan ${results.rowCount} hasil.`
+		return lang === 'id'
+			? `Query selesai dengan ${results.rowCount} hasil.`
+			: `Query completed with ${results.rowCount} result(s).`
 	}
 
 	// For SELECT queries
-	if (results.rowCount === 0) {
-		return `Tidak ditemukan ${roadType} yang sesuai.`
+	if (lang === 'id') {
+		if (results.rowCount === 0) return `Tidak ditemukan ${roadType} yang sesuai.`
+		if (results.rowCount === 1) return `Ditemukan 1 ${roadType}.`
+		return `Ditemukan ${results.rowCount} ${roadType}.`
 	}
-	if (results.rowCount === 1) {
-		return `Ditemukan 1 ${roadType}.`
-	}
-	return `Ditemukan ${results.rowCount} ${roadType}.`
+	if (results.rowCount === 0) return `No matching ${roadType} found.`
+	if (results.rowCount === 1) return `Found 1 ${roadType}.`
+	return `Found ${results.rowCount} ${roadType}.`
 }
 
 export function useAIQuery(): UseAIQueryReturn {
@@ -240,7 +255,11 @@ export function useAIQuery(): UseAIQueryReturn {
 		async (prompt: string) => {
 			if (!prompt.trim()) return
 			if (!isDataReady) {
-				store.addErrorMessage('Silakan load data OSM terlebih dahulu sebelum menggunakan AI Query.')
+				store.addErrorMessage(
+				isIndonesian(prompt)
+					? 'Silakan load data OSM terlebih dahulu sebelum menggunakan AI Query.'
+					: 'Please load OSM data first before using AI Query.'
+			)
 				return
 			}
 
@@ -276,11 +295,13 @@ export function useAIQuery(): UseAIQueryReturn {
 				const execResult = await executeQuery(result.sql)
 
 				if (execResult.error) {
-					store.addErrorMessage(`Query gagal: ${execResult.error}`)
+					store.addErrorMessage(
+					isIndonesian(prompt) ? `Query gagal: ${execResult.error}` : `Query failed: ${execResult.error}`
+				)
 					store.setStatus('error')
 				} else {
 					// Format message based on query type
-					const summary = formatResultMessage(queryType, execResult, result.sql)
+					const summary = formatResultMessage(queryType, execResult, result.sql, prompt)
 					
 					store.addAssistantMessage(
 						summary,
@@ -293,7 +314,9 @@ export function useAIQuery(): UseAIQueryReturn {
 					highlightAndZoom(execResult, queryType)
 				}
 			} catch (error) {
-				store.addErrorMessage('Gagal memproses query. Silakan coba lagi.')
+				store.addErrorMessage(
+				isIndonesian(prompt) ? 'Gagal memproses query. Silakan coba lagi.' : 'Failed to process query. Please try again.'
+			)
 				store.setStatus('error')
 			}
 		},
