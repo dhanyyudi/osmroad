@@ -51,7 +51,7 @@ function detectQueryType(sql: string): 'count' | 'aggregate' | 'select' | 'group
 // Extract highway type from SQL for user-friendly messages
 function extractRoadType(sql: string): string | null {
 	const match = sql.match(/highway\s*=\s*['"]([^'"]+)['"]/i)
-	return match ? match[1] : null
+	return match ? (match[1] ?? null) : null
 }
 
 // Detect if a query is in Indonesian
@@ -311,7 +311,7 @@ export function useAIQuery(): UseAIQueryReturn {
 					store.setStatus('completed')
 					
 					// Highlight and zoom to results on map
-					highlightAndZoom(execResult, queryType)
+					highlightAndZoom(execResult, queryType, result.sql)
 				}
 			} catch (error) {
 				store.addErrorMessage(

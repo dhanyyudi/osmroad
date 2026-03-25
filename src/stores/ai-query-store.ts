@@ -17,6 +17,7 @@ export interface QueryResults {
 	rowCount: number
 	executionTime: number
 	sampleData?: unknown[]
+	allData?: unknown[]
 	error?: string
 }
 
