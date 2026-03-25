@@ -332,6 +332,7 @@ export function MapViewer({ showMobileControls = false }: { showMobileControls?:
 		return [
 			`osmviz:${dataset.osmId}:ways`,
 			`osmviz:${dataset.osmId}:ways-dashed`,
+			`osmviz:${dataset.osmId}:ferry`,
 			`osmviz:${dataset.osmId}:node-bg`,
 			`osmviz:${dataset.osmId}:node-icons`,
 			`osmviz:${dataset.osmId}:nodes-plain`,
