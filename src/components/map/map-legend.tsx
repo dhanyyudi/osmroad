@@ -42,7 +42,7 @@ const NODE_LEGEND: Array<{
 	{ color: "#cccccc", label: "Node (other)" },
 ]
 
-const ROAD_LEGEND = [
+const ROAD_LEGEND: Array<{ color: string; label: string; width?: number; dashed?: boolean; ferryDash?: boolean }> = [
 	{ color: "#0055CC", label: "Motorway (Blue)", width: 4 },
 	{ color: "#8B008B", label: "Trunk (Purple)", width: 3.5 },
 	{ color: "#FF8C00", label: "Primary (Orange)", width: 3 },
@@ -55,6 +55,7 @@ const ROAD_LEGEND = [
 	{ color: "#20B2AA", label: "Cycleway", dashed: true },
 	{ color: "#9370DB", label: "Path", dashed: true },
 	{ color: "#B8860B", label: "Track", dashed: true },
+	{ color: "#38BDF8", label: "Ferry Route", dashed: true, ferryDash: true },
 ]
 
 export function MapLegend() {
@@ -88,7 +89,7 @@ export function MapLegend() {
 												x1="0" y1="4" x2="24" y2="4"
 												stroke={item.color}
 												strokeWidth={item.width || 3}
-												strokeDasharray={item.dashed ? "4 3" : undefined}
+												strokeDasharray={item.ferryDash ? "6 4" : item.dashed ? "4 3" : undefined}
 												strokeLinecap="round"
 											/>
 										</svg>

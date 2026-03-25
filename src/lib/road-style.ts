@@ -56,6 +56,8 @@ export const roadColorExpression: ExpressionSpecification = [
 		"track", "#B8860B",         // Dark Goldenrod
 		"steps", "#4B0082",
 		"bridleway", "#B8860B",
+		// Ferry (highway=ferry)
+		"ferry", "#38BDF8",         // Sky Blue
 		// Special
 		"construction", "#FF6347",  // Tomato
 		"proposed", "#94A3B8",      // gray-400
@@ -232,6 +234,10 @@ export const DASHED_HIGHWAYS = new Set([
 	"proposed",
 ])
 
+/** Ferry route color */
+export const FERRY_COLOR = "#38BDF8" // Sky Blue
+export const FERRY_COLOR_HIGHLIGHTED = "#fbbf24" // amber (matches HIGHLIGHT_COLOR)
+
 /** Road type labels for legend */
 export const ROAD_TYPE_LABELS: Record<string, string> = {
 	motorway: "Motorway",
@@ -259,6 +265,7 @@ export const ROAD_TYPE_LABELS: Record<string, string> = {
 	construction: "Construction",
 	proposed: "Proposed",
 	road: "Road",
+	ferry: "Ferry Route",
 }
 
 /** Color descriptions for accessibility */

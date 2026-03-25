@@ -17,6 +17,8 @@ import {
 	roadCasingColorExpression,
 	roadWidthExpression,
 	roadCasingWidthExpression,
+	FERRY_COLOR,
+	FERRY_COLOR_HIGHLIGHTED,
 } from "../../lib/road-style"
 import { registerNodeIcons, nodeIconId } from "../../lib/node-icons"
 
@@ -58,16 +60,30 @@ const notOnewayFilter: FilterSpecification = [
 	]],
 ]
 
+// Ferry routes: highway=ferry (old tagging) OR route=ferry (way-level)
+const ferryFilter: FilterSpecification = [
+	"all",
+	["==", ["geometry-type"], "LineString"],
+	["any",
+		["==", ["get", "highway"], "ferry"],
+		["==", ["get", "route"], "ferry"],
+	],
+]
+
+// Non-ferry solid roads
 const DASHED_TYPES = ["track", "path", "footway", "sidewalk", "cycleway", "steps", "bridleway", "construction", "proposed"]
 const dashedFilter: FilterSpecification = [
 	"all",
 	["==", ["geometry-type"], "LineString"],
 	["in", ["get", "highway"], ["literal", DASHED_TYPES]],
+	["!=", ["get", "route"], "ferry"],
 ]
 const solidFilter: FilterSpecification = [
 	"all",
 	["==", ["geometry-type"], "LineString"],
 	["!", ["in", ["get", "highway"], ["literal", DASHED_TYPES]]],
+	["!=", ["get", "highway"], "ferry"],
+	["!=", ["get", "route"], "ferry"],
 ]
 
 // barrierFilter replaced by iconNodeFilter below
@@ -159,6 +175,7 @@ function allLayerIds(osmId: string) {
 		`osmviz:${osmId}:casing`,
 		`osmviz:${osmId}:ways`,
 		`osmviz:${osmId}:ways-dashed`,
+		`osmviz:${osmId}:ferry`,
 		`osmviz:${osmId}:way-direction`,
 		`osmviz:${osmId}:oneway-casing`,
 		`osmviz:${osmId}:oneway-arrows`,
@@ -355,6 +372,30 @@ export function RoadLayer({ osmId }: RoadLayerProps) {
 						"line-width": roadWidthExpression as any,
 						"line-dasharray": [4, 3],
 						"line-opacity": 1,
+					},
+				})
+			}
+
+			// === FERRY ROUTES (OSM-only) ===
+			if (isOsmFormat) {
+				map.addLayer({
+					id: `osmviz:${osmId}:ferry`,
+					type: "line",
+					source: sourceId,
+					"source-layer": waysSL,
+					filter: ferryFilter,
+					minzoom: vectorMinZoom,
+					layout: { "line-join": "round", "line-cap": "round" },
+					paint: {
+						"line-color": [
+							"case",
+							["boolean", ["feature-state", "highlighted"], false],
+							FERRY_COLOR_HIGHLIGHTED,
+							FERRY_COLOR,
+						] as any,
+						"line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.5, 14, 3, 18, 5],
+						"line-dasharray": [6, 4],
+						"line-opacity": 0.9,
 					},
 				})
 			}
@@ -683,6 +724,9 @@ export function RoadLayer({ osmId }: RoadLayerProps) {
 			if (map.getLayer(`osmviz:${osmId}:ways-dashed`)) {
 				map.setPaintProperty(`osmviz:${osmId}:ways-dashed`, "line-color", roadColor as any)
 				map.setPaintProperty(`osmviz:${osmId}:ways-dashed`, "line-opacity", opacity)
+			}
+			if (map.getLayer(`osmviz:${osmId}:ferry`)) {
+				map.setPaintProperty(`osmviz:${osmId}:ferry`, "line-opacity", opacity * 0.9)
 			}
 			if (map.getLayer(`osmviz:${osmId}:road-labels`)) {
 				map.setPaintProperty(`osmviz:${osmId}:road-labels`, "text-opacity", opacity * 0.85)
