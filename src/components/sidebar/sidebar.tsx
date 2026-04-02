@@ -77,22 +77,6 @@ function IconRail({
 				)}
 			</button>
 
-			{/* AI Tab - Highlighted at top */}
-			<button
-				onClick={() => onTabChange("ai")}
-				className={`p-2.5 transition-colors border-b border-zinc-800 ${
-					activeTab === "ai"
-						? "text-purple-400 bg-purple-500/20"
-						: "text-zinc-400 hover:text-purple-300 hover:bg-purple-500/10"
-				}`}
-				title="AI Query"
-			>
-				<Sparkles className="h-4 w-4 mx-auto" />
-			</button>
-
-			{/* Divider */}
-			<div className="border-b border-zinc-800 my-1" />
-
 			{/* Main tabs */}
 			<div className="flex-1 overflow-y-auto">
 				{MAIN_TABS.map(({ id, label, icon: Icon }) => (

@@ -46,6 +46,7 @@ interface UIState {
 
 	setActiveTab: (tab: SidebarTab) => void
 	setMobilePanelOpen: (open: boolean) => void
+	openAIPanel: () => void
 	toggleSidebar: () => void
 	toggleLayer: (layer: keyof LayerVisibility) => void
 	setBasemapId: (id: string) => void
@@ -76,6 +77,11 @@ export const useUIStore = create<UIState>((set) => ({
 
 	setActiveTab: (tab) => set({ activeTab: tab }),
 	setMobilePanelOpen: (open) => set({ mobilePanelOpen: open }),
+	openAIPanel: () => set({
+		activeTab: "ai",
+		sidebarOpen: true,
+		mobilePanelOpen: true,
+	}),
 	toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 	toggleLayer: (layer) =>
 		set((s) => ({

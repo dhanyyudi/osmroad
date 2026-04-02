@@ -16,3 +16,4 @@ public/gif/
 *.avi
 .vercel
 .env*.local
+AGENTS.md
