@@ -3,11 +3,12 @@
  * Converts various geo formats to GeoJSON for ingestion via remote.fromGeoJSON()
  *
  * Supported: .osm, .geojson, .gpx, .kml, .kmz, .zip (shapefile)
+ *
+ * jszip, sheetjs-free shapefile and togeojson together are ~150 kB of parser
+ * that only matter to someone opening a .kmz or a zipped shapefile. They are
+ * imported inside the branch that needs them so a plain .osm.pbf load — by far
+ * the common case — never downloads any of it.
  */
-
-import * as toGeoJSON from "togeojson"
-import JSZip from "jszip"
-import * as shapefile from "shapefile"
 
 export type FileFormat =
 	| "pbf"
@@ -153,6 +154,7 @@ async function convertGeoJSON(file: File): Promise<GeoJSON.FeatureCollection> {
 
 // --- GPX ---
 async function convertGpx(file: File): Promise<GeoJSON.FeatureCollection> {
+	const toGeoJSON = await import("togeojson")
 	const text = await file.text()
 	const parser = new DOMParser()
 	const doc = parser.parseFromString(text, "application/xml")
@@ -163,6 +165,7 @@ async function convertGpx(file: File): Promise<GeoJSON.FeatureCollection> {
 
 // --- KML ---
 async function convertKml(file: File): Promise<GeoJSON.FeatureCollection> {
+	const toGeoJSON = await import("togeojson")
 	const text = await file.text()
 	const parser = new DOMParser()
 	const doc = parser.parseFromString(text, "application/xml")
@@ -173,6 +176,10 @@ async function convertKml(file: File): Promise<GeoJSON.FeatureCollection> {
 
 // --- KMZ (zipped KML) ---
 async function convertKmz(file: File): Promise<GeoJSON.FeatureCollection> {
+	const [{ default: JSZip }, toGeoJSON] = await Promise.all([
+		import("jszip"),
+		import("togeojson"),
+	])
 	const zip = await JSZip.loadAsync(file)
 	const kmlFile = Object.values(zip.files).find((f) => f.name.toLowerCase().endsWith(".kml"))
 	if (!kmlFile) throw new Error("No KML file found inside KMZ archive")
@@ -186,6 +193,10 @@ async function convertKmz(file: File): Promise<GeoJSON.FeatureCollection> {
 
 // --- Shapefile ZIP (.zip containing .shp + .dbf) ---
 async function convertShpZip(file: File): Promise<GeoJSON.FeatureCollection> {
+	const [{ default: JSZip }, shapefile] = await Promise.all([
+		import("jszip"),
+		import("shapefile"),
+	])
 	const zip = await JSZip.loadAsync(file)
 
 	const shpFile = Object.values(zip.files).find((f) => f.name.toLowerCase().endsWith(".shp"))

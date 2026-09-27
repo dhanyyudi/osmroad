@@ -19,13 +19,15 @@ interface SampleFile {
 	name: string
 	url: string
 	description: string
-	format: "pbf"
+	format: "pbf" | "parquet"
 	region: string
 	flag: string
 	size: string
 	downloadedOn: string
 }
 
+// Served out of R2 by the Worker at /samples/*. They are not static assets:
+// Cloudflare caps a single asset at 25 MiB and the Taipei extract is 75 MB.
 const SAMPLE_FILES: SampleFile[] = [
 	{
 		name: "Bali Island",
@@ -38,6 +40,16 @@ const SAMPLE_FILES: SampleFile[] = [
 		downloadedOn: "23 March 2026",
 	},
 	{
+		name: "Bali (GeoParquet)",
+		url: "/samples/bali-island-roads.geoparquet",
+		description: "Bali as columnar GeoParquet",
+		format: "parquet",
+		region: "indonesia-parquet",
+		flag: "PQ",
+		size: "~25 MB",
+		downloadedOn: "23 March 2026",
+	},
+	{
 		name: "Singapore",
 		url: "/samples/singapore-roads.osm.pbf",
 		description: "Singapore full road network",
@@ -45,6 +57,16 @@ const SAMPLE_FILES: SampleFile[] = [
 		region: "singapore",
 		flag: "SG",
 		size: "~14 MB",
+		downloadedOn: "23 March 2026",
+	},
+	{
+		name: "Singapore (GeoParquet)",
+		url: "/samples/singapore-roads.geoparquet",
+		description: "Singapore as columnar GeoParquet",
+		format: "parquet",
+		region: "singapore-parquet",
+		flag: "PQ",
+		size: "~15 MB",
 		downloadedOn: "23 March 2026",
 	},
 	{
@@ -138,14 +160,17 @@ export function FilePanel() {
 			try {
 				const format = detectFormat(file)
 				if (format === "unknown") {
-					throw new Error(`Unsupported file type: ${file.name}. Supported formats: .pbf, .osm, .geojson, .gpx, .kml, .kmz, .zip`)
+					throw new Error(
+						`Unsupported file type: ${file.name}. Supported formats: .pbf, .osm, .geoparquet, .geojson, .gpx, .kml, .kmz, .zip`,
+					)
 				}
 
 				let result
 				if (format === "pbf") {
+					// Streamed straight into the worker — see `fromPbf` in use-osm.ts.
 					result = await remote.fromPbf(file, { id: file.name })
 				} else if (format === "parquet") {
-					result = await (remote as any).fromGeoParquet(file, { id: file.name })
+					result = await remote.fromGeoParquet(file, { id: file.name })
 				} else {
 					const geojson = await convertToGeoJSON(file, format)
 					const gjFile = new File([JSON.stringify(geojson)], file.name, { type: "application/geo+json" })
@@ -184,16 +209,19 @@ export function FilePanel() {
 				throw new Error(`Failed to download: ${response.statusText}`)
 			}
 			const blob = await response.blob()
-			const fileName = sampleFile.url.split('/').pop() || `${sampleFile.region}_sample.osm.pbf`
-			const file = new File([blob], fileName, {
-				type: "application/octet-stream",
-			})
-			const result = await remote.fromPbf(file, { id: fileName })
+			const fileName = sampleFile.url.split("/").pop() || `${sampleFile.region}_sample.osm.pbf`
+			const file = new File([blob], fileName, { type: "application/octet-stream" })
+
+			const result =
+				sampleFile.format === "parquet"
+					? await remote.fromGeoParquet(file, { id: fileName })
+					: await remote.fromPbf(file, { id: fileName })
+
 			store.setDataset({
 				osmId: result.id,
 				info: result,
-				fileName: fileName,
-				format: "pbf",
+				fileName,
+				format: sampleFile.format,
 			})
 			store.setLoading(false)
 			store.setProgress(null)
@@ -389,7 +417,7 @@ out geom;`
 				disabled={isLoading || !remote || isLocked}
 			/>
 			<p className="text-[10px] text-zinc-600 -mt-2">
-				Supported: .pbf, .osm, .geojson, .gpx, .kml, .kmz, .zip (shapefile), .parquet
+				Supported: .pbf, .osm, .geoparquet, .geojson, .gpx, .kml, .kmz, .zip (shapefile)
 			</p>
 
 			{/* Sample Data Section - Multiple Regions */}

@@ -200,7 +200,7 @@ SQL: SELECT * FROM roads WHERE highway = 'footway';
 `.trim()
 
 /**
- * Build the complete prompt for Vertex AI
+ * Build the complete prompt for the edge AI endpoint (POST /api/ai/query)
  */
 export function buildPrompt(userQuery: string): string {
 	return `${SYSTEM_INSTRUCTION}
@@ -375,10 +375,8 @@ export function parseNaturalLanguage(query: string): ParsedQuery {
   const filters: QueryFilter = {}
 
   // Extract road type
-  let highway: string | null = null
   for (const [term, type] of Object.entries(ROAD_TYPE_MAPPINGS)) {
     if (lower.includes(term)) {
-      highway = type
       filters.highway = [type]
       break
     }
@@ -386,7 +384,7 @@ export function parseNaturalLanguage(query: string): ParsedQuery {
 
   // Extract name filter
   const nameMatch = lower.match(/(?:nama|name|dengan nama|called)\s+['"]?([^'"]+)['"]?/i)
-  if (nameMatch) {
+  if (nameMatch?.[1]) {
     filters.nameContains = nameMatch[1].trim()
   }
 

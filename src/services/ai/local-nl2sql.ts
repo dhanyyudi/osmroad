@@ -28,7 +28,7 @@ export function naturalLanguageToSQLLocal(query: string): NL2SQLResult {
 
 	// Group/Stats queries
 	if (lower.includes('group') || lower.includes('by type') || lower.includes('statistik') || lower.includes('per tipe')) {
-		return parseGroupQuery(lower)
+		return parseGroupQuery()
 	}
 
 	// Aggregate queries (sum, avg, etc)
@@ -85,7 +85,7 @@ function parseSelectQuery(query: string): NL2SQLResult {
 	}
 }
 
-function parseGroupQuery(query: string): NL2SQLResult {
+function parseGroupQuery(): NL2SQLResult {
 	return {
 		sql: "SELECT highway, COUNT(*) as count FROM roads GROUP BY highway ORDER BY count DESC;",
 	}
@@ -143,13 +143,13 @@ function extractHighwayType(query: string): string | null {
 function extractMinLength(query: string): number | null {
 	// Match: "longer than X km", "more than X km", "lebih dari X km"
 	const kmMatch = query.match(/(?:longer than|more than|lebih dari)\s+(\d+)\s*(?:km|kilometer)/)
-	if (kmMatch) {
+	if (kmMatch?.[1]) {
 		return parseInt(kmMatch[1]) * 1000
 	}
 
 	// Match: "X km" (assuming minimum)
 	const simpleKmMatch = query.match(/(\d+)\s*(?:km|kilometer)(?:\s+ke atas)?/)
-	if (simpleKmMatch && !query.includes('shorter') && !query.includes('less than')) {
+	if (simpleKmMatch?.[1] && !query.includes('shorter') && !query.includes('less than')) {
 		return parseInt(simpleKmMatch[1]) * 1000
 	}
 
@@ -159,7 +159,7 @@ function extractMinLength(query: string): number | null {
 function extractMaxLength(query: string): number | null {
 	// Match: "shorter than X km", "less than X km", "kurang dari X km"
 	const kmMatch = query.match(/(?:shorter than|less than|kurang dari)\s+(\d+)\s*(?:km|kilometer)/)
-	if (kmMatch) {
+	if (kmMatch?.[1]) {
 		return parseInt(kmMatch[1]) * 1000
 	}
 
@@ -169,7 +169,7 @@ function extractMaxLength(query: string): number | null {
 function extractName(query: string): string | null {
 	// Match: "named 'X'" or "nama 'X'"
 	const nameMatch = query.match(/(?:named|nama|bernama)\s+['"]([^'"]+)['"]/)
-	if (nameMatch) {
+	if (nameMatch?.[1]) {
 		return nameMatch[1]
 	}
 

@@ -18,3 +18,12 @@ public/gif/
 .vercel
 .env*.local
 AGENTS.md
+
+# Cloudflare / Wrangler
+.wrangler/
+
+# Derived from node_modules by scripts/prepare-duckdb-wasm.mjs
+public/duckdb/
+
+# Derived sample: regenerated on demand by scripts/upload-assets.mjs
+samples/*.geoparquet

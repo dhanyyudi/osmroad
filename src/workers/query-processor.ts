@@ -58,6 +58,8 @@ export async function executeStreamingQuery(
 	let filteredCount = 0
 	let resultRows: RoadRecord[] = []
 	let batchNumber = 0
+	// Matching rows already skipped to honour `offset`.
+	let skipped = 0
 
 	// Process dalam batches
 	for (let i = 0; i < roads.length; i += batchSize) {
@@ -74,9 +76,11 @@ export async function executeStreamingQuery(
 		// Add ke results jika dalam offset/limit range
 		if (resultRows.length < limit) {
 			const remaining = limit - resultRows.length
-			const toAdd = filteredBatch.slice(0, remaining)
+			const start = Math.max(0, offset - skipped)
+			const toAdd = filteredBatch.slice(start, start + remaining)
 			resultRows.push(...toAdd)
 		}
+		skipped += filteredBatch.length
 
 		// Report progress
 		if (onProgress) {
@@ -267,17 +271,17 @@ export function parseNaturalLanguageQuery(query: string): QueryFilter {
 	const kmMatch = lower.match(/(\d+)\s*km/)
 	const meterMatch = lower.match(/(\d+)\s*m/)
 
-	if (longerThanMatch) {
+	if (longerThanMatch?.[1]) {
 		filter.minLength = parseInt(longerThanMatch[1]) * 1000
-	} else if (kmMatch && !lower.includes('shorter')) {
+	} else if (kmMatch?.[1] && !lower.includes('shorter')) {
 		filter.minLength = parseInt(kmMatch[1]) * 1000
-	} else if (meterMatch && !lower.includes('shorter')) {
+	} else if (meterMatch?.[1] && !lower.includes('shorter')) {
 		filter.minLength = parseInt(meterMatch[1])
 	}
 
 	// Extract name search
 	const namedMatch = lower.match(/named ['"]([^'"]+)['"]/)
-	if (namedMatch) {
+	if (namedMatch?.[1]) {
 		filter.name = namedMatch[1]
 	}
 

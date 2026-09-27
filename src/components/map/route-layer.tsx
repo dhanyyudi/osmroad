@@ -70,10 +70,6 @@ export function RouteLayer() {
 	// Refs for click point markers (A/B)
 	const markerA = useRef<maplibregl.Marker | null>(null)
 	const markerB = useRef<maplibregl.Marker | null>(null)
-	// Refs for snapped node markers (smaller dots)
-	const snappedMarkerA = useRef<maplibregl.Marker | null>(null)
-	const snappedMarkerB = useRef<maplibregl.Marker | null>(null)
-
 	// GeoJSON for lines and points
 	const geojson = useMemo((): GeoJSON.FeatureCollection => {
 		const features: GeoJSON.Feature[] = []

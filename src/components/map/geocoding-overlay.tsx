@@ -44,15 +44,17 @@ export function GeocodingOverlay() {
 					headers: { "User-Agent": "OSMRoad/1.0" },
 				},
 			)
-			const data = await response.json()
+			const data = (await response.json()) as Array<{
+				lat: string
+				lon: string
+				display_name: string
+			}>
 			setResults(
-				data.map(
-					(item: { lat: string; lon: string; display_name: string }) => ({
-						lat: parseFloat(item.lat),
-						lon: parseFloat(item.lon),
-						displayName: item.display_name,
-					}),
-				),
+				data.map((item) => ({
+					lat: parseFloat(item.lat),
+					lon: parseFloat(item.lon),
+					displayName: item.display_name,
+				})),
 			)
 		} catch (err) {
 			console.error("Geocoding error:", err)

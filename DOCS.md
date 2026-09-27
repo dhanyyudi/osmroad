@@ -73,8 +73,8 @@ Max zoom is capped for large files to prevent tile overload.
 User query
     │
     ▼
-Try /api/ai/query (Vertex AI — Gemini 2.5 Flash)
-    │ fails (404, offline, rate-limit)
+POST /api/ai/query (Cloudflare Worker → Workers AI)
+    │ fails (offline, 503, rate-limit)
     ▼
 Local NL2SQL parser (offline, rule-based)
     │
@@ -87,15 +87,22 @@ File size check
 Results + highlight on map
 ```
 
-### Vertex AI Path
+### Workers AI Path
 
-`/api/ai/query` is a Vercel serverless function. It:
+`/api/ai/query` is a route in the edge Worker (`worker/index.ts`), paired with the
+prompt in `worker/nl2sql.ts`. It:
+
 1. Receives the user's natural language question
-2. Builds a prompt with schema context + 20+ few-shot examples
-3. Calls Gemini 2.5 Flash via Vertex AI
-4. Returns SQL
+2. Validates it and applies a best-effort per-isolate rate limit
+3. Builds a prompt with the `roads` schema context and a few-shot example block
+4. Calls `env.AI.run()` with `@cf/qwen/qwen2.5-coder-32b-instruct`
+5. Retries once on the smaller `@cf/meta/llama-3.1-8b-instruct-fp8` if the first
+   model returns nothing usable
+6. Cleans the response (strips markdown fences, keeps the first statement) and
+   returns `{ sql, success: true, source: "workers-ai" }`
 
-Service account credentials stay server-side only.
+There are no provider credentials: Workers AI is reached through a binding, so
+there is no service account, API key, or secret to configure.
 
 ### Local Parser Fallback
 
@@ -250,17 +257,72 @@ CREATE TABLE roads (
 );
 ```
 
-Queries run at WebAssembly speed in the browser. The `useOsmDuckDBSync` hook handles the sync with a progress bar.
+Large files skip the sync entirely and use the worker's streaming query path, so
+DuckDB is only ever started for datasets where a SQL engine actually pays off.
+
+DuckDB-wasm is **loaded on demand**. `use-duckdb.ts` statically imports only the
+asset URL strings; the library itself and its 32.7 MiB wasm module are resolved
+inside `initDuckDB()`, which runs when an AI Query or Speed panel mounts. A
+visitor who only opens a PBF file never downloads any of it.
+
+Only the `eh` bundle is shipped. The `mvp` fallback would add ~39 MB to every
+deploy for browsers that fail the exception-handling check in
+`browser-support.ts` anyway, and `selectBundle()` is skipped in favour of naming
+the bundle directly.
+
+The wasm module cannot be a static asset — 32.7 MiB against Cloudflare's 25 MiB
+per-asset limit — so the Worker serves it from R2 at `/duckdb/duckdb-eh.wasm`.
+It is stored **uncompressed**: pre-compressing it and declaring
+`Content-Encoding` either through `_headers` or manually produced a double-encoded
+body that `WebAssembly.instantiateStreaming` cannot read. Cloudflare's own content
+negotiation compresses it in transit instead.
 
 ---
 
 ## 8. PWA & Caching
 
 `vite-plugin-pwa` + Workbox:
-- OSM tiles cached 7 days
-- Sample PBF files cached 30 days
-- App shell cached for offline use
+- App shell precached (~2.3 MB: JS, CSS, HTML, icons)
+- OSM and Carto raster tiles cached 7 days, on demand
+- Sample extracts cached 30 days, on demand
 - Service worker skipped in dev mode (enabled after build only)
+
+The precache list deliberately excludes `*.pbf`, `*.wasm` and the DuckDB worker
+scripts. An earlier `globPatterns` of `**/*.{js,css,html,ico,png,svg,pbf}` with a
+100 MB size ceiling meant every first-time visitor silently downloaded all
+105 MB of sample extracts into Cache Storage in the background.
+
+---
+
+## 9. Edge Deployment
+
+One Cloudflare Worker serves everything:
+
+```
+Request
+   │
+   ├─ /api/ai/query        → Worker: Workers AI NL2SQL
+   ├─ /api/health          → Worker: binding check
+   ├─ /samples/*           → Worker: R2, streamed, supports Range
+   ├─ /duckdb/*            → Worker: R2, DuckDB wasm
+   └─ everything else      → static-asset layer (./dist)
+                             not_found_handling = "single-page-application"
+```
+
+`assets.run_worker_first` is limited to those three prefixes, so a page load
+never pays for a Worker invocation.
+
+Binary assets live in R2 rather than in the bundle:
+
+| Why | Detail |
+|-----|--------|
+| Asset size limit | 25 MiB per static asset; Taipei is 75 MB, DuckDB wasm 32.7 MiB |
+| Deploy weight | `./dist` is ~3 MB instead of ~184 MB |
+| Change cadence | Samples and wasm change rarely; the app deploys often |
+
+COOP/COEP are set in `public/_headers`, which applies to static-asset responses.
+Anything the Worker answers sets its own headers in code — `_headers` rules do
+not apply to Worker-generated responses.
 
 ---
 
@@ -269,10 +331,12 @@ Queries run at WebAssembly speed in the browser. The `useOsmDuckDBSync` hook han
 | Constraint | Reason |
 |-----------|--------|
 | `target: "esnext"` in Vite | MapLibre 5.x uses native private class fields (`#field`) — must not be transpiled |
-| COOP/COEP headers | Required for `SharedArrayBuffer` (DuckDB-wasm needs it) |
+| COOP/COEP headers | Required for transferable `ReadableStream` (streaming PBF load). DuckDB's `eh` bundle is single-threaded and does not itself need `SharedArrayBuffer` |
 | MapLibre 5.x uses native API | `react-map-gl <Source>/<Layer>` incompatible with MapLibre 5 for GeoJSON — use `map.addSource()/addLayer()` directly |
 | `MobileControls` inside `<Map>` | `useMap()` hook requires a MapLibre `<Map>` ancestor in the React tree |
 | osmix patches | `postinstall` script patches osmix's vector tile relation handling |
+| No `osmix` import on the main thread | `osmix`'s entry point re-exports every `@osmix/*` package; `use-osm.ts` declares the worker surface structurally and imports only types |
+| GeoParquet `bbox` column is mandatory | `@osmix/geoparquet` always requests it and hyparquet throws on a missing requested column, even though GeoParquet 1.1 does not require it |
 
 ---
 
@@ -313,7 +377,7 @@ src/
 │   └── ai-query/                  # Chat message, input, SQL preview components
 ├── hooks/
 │   ├── use-media-query.ts         # Responsive breakpoints
-│   ├── use-osm.ts                 # Worker init + ETA
+│   ├── use-osm.ts                 # Worker init, streaming load, progress + ETA
 │   ├── use-ai-query.ts            # AI query orchestration
 │   ├── use-osm-duckdb-sync.ts     # OSM → DuckDB sync
 │   ├── use-ai-map-highlight.ts    # Highlight + zoom
@@ -327,25 +391,33 @@ src/
 │   ├── search-store.ts            # Search highlights
 │   └── speed-store.ts             # Speed profile data
 ├── services/ai/
-│   ├── vertex-ai.ts               # API call + local fallback
+│   ├── edge-ai.ts                 # POST /api/ai/query + local fallback
 │   ├── local-nl2sql.ts            # Offline NL2SQL parser
 │   ├── prompt-builder.ts          # Few-shot prompt engineering
 │   └── guardrails.ts              # Input validation
 ├── workers/
 │   ├── osm.worker.ts              # OsmixWorker + LRU tile cache + query methods
 │   ├── duckdb.worker.ts           # DuckDB-wasm init
-│   └── query-processor.ts        # Streaming batch processor (10K/batch)
+│   └── query-processor.ts         # Streaming batch processor (10K/batch)
 └── lib/
     ├── osmix-vector-protocol.ts   # @osmix/vector tile protocol
     ├── osmix-raster-protocol.ts   # Raster fallback protocol
+    ├── geoparquet-encode.ts       # OSM features → GeoParquet (shared with Node)
+    ├── format-converter.ts        # GPX/KML/KMZ/shapefile → GeoJSON (lazy parsers)
     ├── road-style.ts              # MapLibre style expressions
     ├── file-size-detector.ts      # Render strategy selection
     ├── map-utils.ts               # Coordinate format, Street View URL
     ├── storage.ts                 # IndexedDB dataset caching
     └── osm-xml-parser.ts          # OSM XML → GeoJSON (Overpass response)
 
-api/
-└── ai/query/index.js              # Vercel serverless — Vertex AI NL2SQL
+worker/
+├── index.ts                       # Edge Worker: /api/*, /samples/*, /duckdb/*
+└── nl2sql.ts                      # Workers AI prompt, SQL cleanup, heuristic fallback
+
+scripts/
+├── pbf-to-geoparquet.mjs          # CLI: .osm.pbf → .geoparquet
+├── prepare-duckdb-wasm.mjs        # Stage the wasm for the dev server
+└── upload-assets.mjs              # Push samples + wasm to R2
 
 patches/
 └── fix-vt-relation-exclusion.js   # postinstall patch for osmix
@@ -358,13 +430,13 @@ patches/
 ```
 User Query
     ↓
-┌─────────────────────┐
-│ Try Vertex AI API   │── fails ──┐
-│ /api/ai/query       │           ▼
-└─────────────────────┘  ┌──────────────────┐
-         ↓ SQL            │ Local NL2SQL     │
-         ↓                │ (offline parser) │
-┌─────────────────────┐   └──────────────────┘
+┌──────────────────────────┐
+│ Workers AI               │── fails ──┐
+│ POST /api/ai/query       │           ▼
+└──────────────────────────┘  ┌──────────────────┐
+         ↓ SQL                │ Local NL2SQL     │
+         ↓                    │ (offline parser) │
+┌─────────────────────┐       └──────────────────┘
 │ File size?          │           ↓ SQL
 └──────────┬──────────┘           ↓
   < 50K    │    > 50K         (same path)

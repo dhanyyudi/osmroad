@@ -127,11 +127,9 @@ export function BottomSheet({
 				</div>
 
 				{/* Header */}
-				{(title || onClose) && (
+				{title && (
 					<div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
-						{title && (
-							<h3 className="text-sm font-semibold text-zinc-200">{title}</h3>
-						)}
+						<h3 className="text-sm font-semibold text-zinc-200">{title}</h3>
 						<button
 							onClick={onClose}
 							className="p-1.5 rounded-full hover:bg-zinc-800 transition-colors"

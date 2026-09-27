@@ -1,0 +1,33 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "osmroad",
+	"main": "./worker/index.ts",
+	"compatibility_date": "2026-09-26",
+	"compatibility_flags": ["nodejs_compat"],
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/api/*", "/samples/*", "/duckdb/*"]
+	},
+	"ai": {
+		"binding": "AI"
+	},
+	// Holds the sample extracts (/samples/*) and the pre-compressed DuckDB wasm
+	// (/duckdb/*). Neither can be a static asset: Cloudflare caps one at 25 MiB
+	// and the DuckDB module is 32.7 MiB raw.
+	"r2_buckets": [
+		{
+			"binding": "STORAGE",
+			"bucket_name": "osmroad-samples"
+		}
+	],
+	"vars": {
+		"AI_MODEL": "@cf/qwen/qwen2.5-coder-32b-instruct",
+		"AI_FALLBACK_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8"
+	},
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	}
+}

@@ -42,7 +42,6 @@ export function useOsmDuckDBSync() {
 		setProgress(0)
 		cancelRef.current = false
 
-		const nodeCount = dataset.info.stats.nodes
 		const wayCount = dataset.info.stats.ways
 		
 		// For large files, skip DuckDB sync and use worker queries directly

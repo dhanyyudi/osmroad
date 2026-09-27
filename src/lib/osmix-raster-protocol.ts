@@ -37,28 +37,33 @@ export function addOsmixRasterProtocol() {
 			const remote = getOsmRemote()
 			if (!remote || abortController.signal.aborted) return { data: null }
 
+			// Get raster tile data from worker
+			// Using custom line color for dark theme visibility
+			const opts: DrawToRasterTileOptions = {
+				tileSize: 256,
+				lineColor: [255, 255, 255, 180], // White roads with slight transparency
+				pointColor: [200, 200, 200, 200], // Gray points
+			}
+
 			try {
-				// Get raster tile data from worker
-				// Using custom line color for dark theme visibility
-				const opts: DrawToRasterTileOptions = {
-					tileSize: 256,
-					lineColor: [255, 255, 255, 180],  // White roads with slight transparency
-					pointColor: [200, 200, 200, 200], // Gray points
-				}
-				
 				const rgbaData = await remote.getWorker().getRasterTile(
 					decodeURIComponent(osmId!),
 					tile,
-					opts
+					opts,
 				)
 
 				if (!rgbaData || rgbaData.byteLength === 0) {
 					return { data: null }
 				}
 
-				// Convert RGBA data to ImageBitmap
+				// Convert RGBA data to ImageBitmap. `Uint8ClampedArray<ArrayBufferLike>`
+				// is not assignable to ImageData's `ImageDataArray`, which requires a
+				// plain ArrayBuffer, so copy into a correctly-backed clamped array.
+				const pixels = new Uint8ClampedArray(rgbaData.length)
+				pixels.set(rgbaData)
+
 				const imageData = new ImageData(
-					rgbaData,
+					pixels,
 					256,
 					256
 				)

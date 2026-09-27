@@ -103,7 +103,9 @@ export function SearchPanel() {
 					if (node.tags) for (const [k, v] of Object.entries(node.tags)) tags[k] = String(v)
 					const label = tags.name ?? tags.barrier ?? `node/${node.id}`
 					found.push({ id: node.id, type: "node", tags, label })
-					highlights.push({ id: node.id, type: "node", coords: [[node.lon, node.lat]], tags, label })
+					if (node.lon !== undefined && node.lat !== undefined) {
+						highlights.push({ id: node.id, type: "node", coords: [[node.lon, node.lat]], tags, label })
+					}
 				}
 
 				// Relation results

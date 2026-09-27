@@ -22,8 +22,11 @@ export function BottomPanel({
 	const startHeightRef = useRef(0)
 
 	const handleTouchStart = (e: TouchEvent) => {
+		const touch = e.touches[0]
+		if (!touch) return
+
 		setIsDragging(true)
-		startYRef.current = e.touches[0].clientY
+		startYRef.current = touch.clientY
 		startHeightRef.current = height
 	}
 

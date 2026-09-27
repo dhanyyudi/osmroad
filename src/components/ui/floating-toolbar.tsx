@@ -13,7 +13,7 @@ interface FloatingToolbarProps {
 
 export function FloatingToolbar({ position = "top-right" }: FloatingToolbarProps) {
 	const [isExpanded, setIsExpanded] = useState(true)
-	const { layers, toggleLayer, basemapId, setBasemapId } = useUIStore()
+	const { layers, toggleLayer } = useUIStore()
 	const dataset = useOsmStore((s) => s.dataset)
 
 	const positionClasses = {
