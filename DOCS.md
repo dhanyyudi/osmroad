@@ -73,7 +73,7 @@ Max zoom is capped for large files to prevent tile overload.
 User query
     │
     ▼
-POST /api/ai/query (Cloudflare Worker → Workers AI)
+POST /api/ai/query (Cloudflare Worker → SumoPod → Workers AI)
     │ fails (offline, 503, rate-limit)
     ▼
 Local NL2SQL parser (offline, rule-based)
@@ -87,22 +87,34 @@ File size check
 Results + highlight on map
 ```
 
-### Workers AI Path
+### AI Provider Path
 
 `/api/ai/query` is a route in the edge Worker (`worker/index.ts`), paired with the
 prompt in `worker/nl2sql.ts`. It:
 
 1. Receives the user's natural language question
-2. Validates it and applies a best-effort per-isolate rate limit
+2. Checks `Origin` against `ALLOWED_ORIGINS` and applies a best-effort
+   per-isolate rate limit
 3. Builds a prompt with the `roads` schema context and a few-shot example block
-4. Calls `env.AI.run()` with `@cf/qwen/qwen2.5-coder-32b-instruct`
-5. Retries once on the smaller `@cf/meta/llama-3.1-8b-instruct-fp8` if the first
-   model returns nothing usable
-6. Cleans the response (strips markdown fences, keeps the first statement) and
-   returns `{ sql, success: true, source: "workers-ai" }`
+4. Tries each configured provider in order, stopping at the first non-empty answer:
+   - **SumoPod** (`AI_API_KEY` set) — one `fetch` to
+     `$AI_BASE_URL/chat/completions`, the OpenAI-compatible shape. No SDK: it
+     would be bundle weight in the Worker for a single request.
+   - **Workers AI** (`env.AI.run`) — the binding, always available.
+5. Cleans the response (strips markdown fences, keeps the first statement) and
+   returns `{ sql, success: true, source, model }`, where `source` names the
+   provider that actually answered
 
-There are no provider credentials: Workers AI is reached through a binding, so
-there is no service account, API key, or secret to configure.
+If neither provider produces usable SQL the Worker substitutes a deterministic
+answer for a few very common questions (`source: "heuristic"`), and failing that
+returns 503 so the browser's offline parser takes over.
+
+The SumoPod key is the only credential. It is a Worker secret, set with
+`npx wrangler secret put AI_API_KEY`, and it appears nowhere in this repository —
+`wrangler.jsonc` declares only the variable names. `worker-configuration.d.ts` is
+generated with `--env-file .dev.vars.example` so tsc sees `AI_API_KEY: string`
+without a `secrets.required` gate (which would hard-block deploys while the key
+is still optional).
 
 ### Local Parser Fallback
 
@@ -301,7 +313,7 @@ One Cloudflare Worker serves everything:
 ```
 Request
    │
-   ├─ /api/ai/query        → Worker: Workers AI NL2SQL
+   ├─ /api/ai/query        → Worker: SumoPod / Workers AI NL2SQL
    ├─ /api/health          → Worker: binding check
    ├─ /samples/*           → Worker: R2, streamed, supports Range
    ├─ /duckdb/*            → Worker: R2, DuckDB wasm
@@ -412,7 +424,7 @@ src/
 
 worker/
 ├── index.ts                       # Edge Worker: /api/*, /samples/*, /duckdb/*
-└── nl2sql.ts                      # Workers AI prompt, SQL cleanup, heuristic fallback
+└── nl2sql.ts                      # Prompt, SQL cleanup, heuristic fallback
 
 scripts/
 ├── pbf-to-geoparquet.mjs          # CLI: .osm.pbf → .geoparquet
@@ -431,7 +443,7 @@ patches/
 User Query
     ↓
 ┌──────────────────────────┐
-│ Workers AI               │── fails ──┐
+│ SumoPod → Workers AI     │── fails ──┐
 │ POST /api/ai/query       │           ▼
 └──────────────────────────┘  ┌──────────────────┐
          ↓ SQL                │ Local NL2SQL     │

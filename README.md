@@ -26,7 +26,7 @@ Visit **[osmroad.gislabs.workers.dev](https://osmroad.gislabs.workers.dev)** to 
 
 ### Analysis
 
-- **AI Query Assistant** — Ask questions in natural language (English/Indonesian). Runs on Cloudflare Workers AI, with a fully offline local parser as fallback
+- **AI Query Assistant** — Ask questions in natural language (English/Indonesian). Runs on SumoPod (OpenAI-compatible) with a Workers AI fallback, and a fully offline local parser behind both
 - **Turn-by-Turn Routing** — Click two points to route; shows distance, time, and road segments
 - **Entity Search** — Search by ID (`way/123`, `node/456`) or tag value (`highway=primary`)
 - **Access Restrictions Layer** — Visualize `motor_vehicle=no`, `access=no`, barriers
@@ -156,14 +156,16 @@ Requires Node 23+ for native TypeScript type-stripping, because the script impor
 
 ## AI Query Details
 
-The AI assistant uses a two-step fallback:
+The AI assistant degrades through three levels:
 
 ```
 User query
     ↓
-POST /api/ai/query  (Cloudflare Worker → Workers AI)
-    ↓ fails (offline / 503 / rate-limited)
-Local NL2SQL parser (offline)
+POST /api/ai/query  (Cloudflare Worker)
+    ├── SumoPod        OpenAI-compatible, used when AI_API_KEY is set
+    └── Workers AI     binding, used when the key is unset or SumoPod fails
+    ↓ no provider produced usable SQL (offline / 503 / rate-limited)
+Local NL2SQL parser (offline, in the browser)
     ↓
 Execute on:
   Small files (<50K roads)  → DuckDB-wasm
@@ -174,7 +176,38 @@ Highlight results on map
 
 Supported query types: COUNT, SELECT, AGGREGATE, GROUP BY — in English and Indonesian.
 
-`POST /api/ai/query` accepts `{ "prompt": "..." }` and returns `{ "sql": "...", "success": true, "source": "workers-ai" }`. On failure it returns a non-2xx status with `{ "success": false, "error": "..." }`, and the client falls back to its local parser. There are no provider credentials anywhere in this project — Workers AI is reached through a binding, so there is no API key to configure or leak.
+`POST /api/ai/query` accepts `{ "prompt": "..." }` and returns:
+
+```json
+{ "sql": "SELECT ...", "success": true, "source": "sumopod", "model": "gpt-4o-mini" }
+```
+
+`source` is `sumopod`, `workers-ai`, or `heuristic` (the Worker's own deterministic fallback for a few very common questions). On failure it returns a non-2xx status with `{ "success": false, "error": "..." }` and the client falls back to its local parser.
+
+### Configuring the AI backend
+
+SumoPod is the preferred backend. It speaks the OpenAI chat-completions API, so no SDK is involved — the Worker makes one `fetch` to `$AI_BASE_URL/chat/completions`.
+
+```bash
+npx wrangler secret put AI_API_KEY     # your SumoPod key, never written to a file
+```
+
+Without that secret the endpoint falls back to the Workers AI binding, so the feature works out of the box and a provider outage degrades instead of breaking. Three tunables live in `wrangler.jsonc`:
+
+| Var | Purpose |
+|-----|---------|
+| `AI_BASE_URL` | Provider base URL (`https://ai.sumopod.com/v1`) |
+| `AI_MODEL` | SumoPod model id — change this to switch models, no code change |
+| `AI_FALLBACK_MODEL` | Workers AI model used when SumoPod is unavailable |
+
+> **This endpoint is public and, with a provider key set, spends real money.**
+> `ALLOWED_ORIGINS` rejects requests whose `Origin` is not the app itself, which
+> stops a random web page from calling it — but `Origin` is trivial to forge from
+> a non-browser client, so it is a brake, not a security boundary. The in-isolate
+> rate limit is best-effort only (isolates are ephemeral and per-colo). If you
+> expose this beyond yourself, add a **Cloudflare Rate Limiting rule** on
+> `/api/ai/query` and set a budget cap in the SumoPod dashboard.
+
 
 ---
 
@@ -189,7 +222,7 @@ Supported query types: COUNT, SELECT, AGGREGATE, GROUP BY — in English and Ind
 | OSM parsing | osmix + Comlink (Web Workers) |
 | GeoParquet | hyparquet (read, via osmix) + hyparquet-writer (write) |
 | SQL queries | DuckDB-wasm (loaded on demand) |
-| AI / NL2SQL | Cloudflare Workers AI (`@cf/qwen/qwen2.5-coder-32b-instruct`) + local fallback |
+| AI / NL2SQL | SumoPod (OpenAI-compatible) → Workers AI → offline parser |
 | Deployment | Cloudflare Workers + Static Assets, R2 for large binaries |
 | PWA | vite-plugin-pwa + Workbox |
 
@@ -217,7 +250,8 @@ Bindings (see `wrangler.jsonc`):
 |---------|----------|---------|
 | `ASSETS` | Static assets (`./dist`) | App shell |
 | `STORAGE` | R2 bucket `osmroad-samples` | Sample extracts + DuckDB wasm |
-| `AI` | Workers AI | NL2SQL backend |
+| `AI` | Workers AI | NL2SQL fallback backend |
+| `AI_API_KEY` | Worker secret | SumoPod key (optional; unset = Workers AI only) |
 
 CI: `.github/workflows/deploy.yml` typechecks and builds on every PR, and deploys on push to `main` using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
 

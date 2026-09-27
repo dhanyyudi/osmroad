@@ -10,7 +10,7 @@
 		"typecheck": "tsc --noEmit",
 		"postinstall": "node patches/fix-vt-relation-exclusion.js",
 		"prebuild": "node patches/fix-vt-relation-exclusion.js",
-		"cf-typegen": "wrangler types",
+		"cf-typegen": "wrangler types --env-file .dev.vars.example",
 		"cf-dev": "npm run build && wrangler dev",
 		"deploy": "npm run build && wrangler deploy",
 		"deploy:dry-run": "npm run build && wrangler deploy --dry-run",

@@ -27,3 +27,6 @@ public/duckdb/
 
 # Derived sample: regenerated on demand by scripts/upload-assets.mjs
 samples/*.geoparquet
+
+# Local Worker secrets (wrangler dev / cf-dev)
+.dev.vars
