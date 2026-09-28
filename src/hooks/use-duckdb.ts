@@ -214,6 +214,25 @@ async function initDuckDB(): Promise<DuckDBClient | null> {
 	return _initPromise
 }
 
+/**
+ * Drop the AI-query `roads` table.
+ *
+ * Called when a dataset is unloaded. Without it, a large dataset that skips the
+ * DuckDB sync would leave the previous dataset's roads in place, and AI queries
+ * would silently answer from data the user can no longer see.
+ *
+ * A no-op when DuckDB was never initialised or never synced.
+ */
+export async function dropRoadsTable(): Promise<void> {
+	if (!_conn) return
+	try {
+		await _conn.query("DROP TABLE IF EXISTS roads")
+	} catch (err) {
+		// Not fatal: the next sync uses CREATE OR REPLACE TABLE.
+		console.warn("[duckdb] Could not drop the roads table:", err)
+	}
+}
+
 export function useDuckDB() {
 	const [duckClient, setDuckClient] = useState<DuckDBClient | null>(
 		isFullMode() && _conn ? client : null,

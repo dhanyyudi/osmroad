@@ -238,6 +238,19 @@ export class VizWorker extends OsmixWorker {
 	}
 
 	/**
+	 * Drop a dataset and everything cached for it.
+	 *
+	 * OsmixWorker.delete() only releases the Osm index itself, so every cache
+	 * keyed by osmId has to go with it — otherwise the next dataset loaded under
+	 * the same id would be served stale tiles and a stale road table.
+	 */
+	override delete(osmId: string): void {
+		super.delete(osmId)
+		this.tileCache.invalidate(osmId)
+		this.roadsCache.delete(osmId)
+	}
+
+	/**
 	 * Get all restriction relations in the dataset.
 	 */
 	getRestrictions(osmId: string) {

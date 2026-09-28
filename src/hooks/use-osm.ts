@@ -178,6 +178,8 @@ interface VizWorkerApi {
 		options?: Record<string, unknown>,
 	): RouteResultShape | null
 	buildRoutingGraph(osmId: string): { nodeCount: number; edgeCount: number }
+	/** Releases the dataset and every cache the worker holds for it. */
+	delete(osmId: string): void
 	addProgressListener(listener: (progress: Progress) => void): void
 }
 
@@ -203,6 +205,7 @@ export interface VizRemote {
 		options?: GeoParquetExportOptions,
 	): Promise<GeoParquetExportResult>
 	search(osmId: unknown, key: string, val?: string): Promise<SearchHits>
+	deleteDataset(osmId: unknown): Promise<void>
 	findNearestRoutableNode(
 		osmId: unknown,
 		point: [number, number],
@@ -471,6 +474,7 @@ async function initRemote(): Promise<VizRemote> {
 			exportRoadsPbf: (osmId) => worker.exportRoadsPbf(toId(osmId)),
 			exportGeoParquet: (osmId, options) => worker.exportGeoParquet(toId(osmId), options),
 			search: (osmId, key, val) => worker.search(toId(osmId), key, val),
+			deleteDataset: (osmId) => worker.delete(toId(osmId)),
 			findNearestRoutableNode: (osmId, point, maxDistanceM) =>
 				worker.findNearestRoutableNode(toId(osmId), point, maxDistanceM),
 			route: (osmId, fromIndex, toIndex, options) =>

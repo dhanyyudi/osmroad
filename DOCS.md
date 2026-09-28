@@ -243,15 +243,44 @@ Floating panel at bottom-right (inside `<Map>` context, required for `useMap()`)
 
 1. User enters draw mode (BBoxDrawLayer)
 2. Draws rectangle on map → `drawnBbox` stored in `ui-store`
-3. App constructs Overpass QL query:
-   ```
-   [out:xml];
-   way["highway"](south,west,north,east);
-   out geom;
-   ```
-4. Response parsed by `osm-xml-parser.ts` → GeoJSON → loaded on map
+3. The **bounding box** is POSTed to our own Worker at `/api/overpass`
+4. The Worker builds the query, tries mirrors in order, and returns OSM XML
+5. Response parsed by `osm-xml-parser.ts` → GeoJSON → loaded on map
 
-Capped at ~10km² to respect free Overpass service limits.
+### Why it goes through the Worker
+
+The browser used to call `overpass-api.de` directly, which failed for two
+independent reasons:
+
+- **CORS.** The page is cross-origin isolated (`COEP: require-corp`), so a
+  response needs the right CORS headers. Measured from a real client,
+  `overpass-api.de` answers `406 Not Acceptable` — even for `/api/status` with no
+  query — and a 406 carries no `Access-Control-Allow-Origin`. The browser can
+  only report that as an opaque network failure.
+- **No fallback.** One endpoint, one chance.
+
+Routing through the Worker also means the request leaves from Cloudflare's
+network rather than the user's, which can succeed where the client's own network
+is refused. Verified: a client that gets `406` from Overpass directly receives
+3.4 MB of road data through the proxy.
+
+The Worker:
+
+- accepts **only a bounding box**, never a query, so it cannot be used as a
+  general-purpose Overpass gateway
+- enforces a **50 km²** area cap server-side (the UI shows the same limit)
+- tries `overpass-api.de`, then `overpass.kumi.systems`, then
+  `overpass.private.coffee`, 45s each
+- detects Overpass errors that arrive as **HTTP 200 with a `<remark>`** and
+  reports what Overpass actually said, instead of surfacing them as
+  "No roads found in selected area"
+- caches successful responses at the edge for 30 minutes, keyed by query hash
+- reports every mirror's failure, so an outage reads as
+  `overpass-api.de: HTTP 406; kumi.systems: timed out after 45s` rather than
+  "it did not work"
+
+`[out:xml]` is deliberate: the browser already has a working OSM XML parser, and
+switching format would be a larger change than this fix needs.
 
 ---
 
@@ -314,6 +343,7 @@ One Cloudflare Worker serves everything:
 Request
    │
    ├─ /api/ai/query        → Worker: SumoPod / Workers AI NL2SQL
+   ├─ /api/overpass        → Worker: Overpass proxy (mirror fallback + edge cache)
    ├─ /api/health          → Worker: binding check
    ├─ /samples/*           → Worker: R2, streamed, supports Range
    ├─ /duckdb/*            → Worker: R2, DuckDB wasm
@@ -390,6 +420,7 @@ src/
 ├── hooks/
 │   ├── use-media-query.ts         # Responsive breakpoints
 │   ├── use-osm.ts                 # Worker init, streaming load, progress + ETA
+│   ├── use-unload-dataset.ts      # Release a dataset and everything derived from it
 │   ├── use-ai-query.ts            # AI query orchestration
 │   ├── use-osm-duckdb-sync.ts     # OSM → DuckDB sync
 │   ├── use-ai-map-highlight.ts    # Highlight + zoom

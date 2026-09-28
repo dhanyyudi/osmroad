@@ -5,6 +5,7 @@ import { ReloadDialog } from "../shared/reload-dialog"
 import { useOsmStore } from "../../stores/osm-store"
 import { useUIStore } from "../../stores/ui-store"
 import { useOsm } from "../../hooks/use-osm"
+import { useUnloadDataset } from "../../hooks/use-unload-dataset"
 import { osmXmlToGeoJSON, formatBbox, calculateBboxAreaKm2 } from "../../lib/osm-xml-parser"
 import { detectFormat, convertToGeoJSON } from "../../lib/format-converter"
 import {
@@ -12,7 +13,7 @@ import {
 	getLastDataset,
 	type CachedDataset
 } from "../../lib/storage"
-import { FileText, MapPin, Route, GitBranch, MapPinned, SquareDashedMousePointer, Loader2, X, Check, Zap, ArrowRight, Lock, ChevronDown } from "lucide-react"
+import { FileText, MapPin, Route, GitBranch, MapPinned, SquareDashedMousePointer, Loader2, X, Check, Zap, ArrowRight, Trash2, AlertTriangle, ChevronDown } from "lucide-react"
 
 // Sample datasets - Multiple regions for capacity demonstration
 interface SampleFile {
@@ -81,17 +82,26 @@ const SAMPLE_FILES: SampleFile[] = [
 	},
 ]
 
-// Overpass API endpoint
-const OVERPASS_API = "https://overpass-api.de/api/interpreter"
+// Overpass is reached through our own Worker (/api/overpass) rather than
+// directly. Direct calls failed for two independent reasons: the page is
+// cross-origin isolated, and overpass-api.de refuses some client networks
+// outright with a 406 that carries no CORS headers — which the browser can only
+// report as an opaque network error. The Worker also retries across mirrors and
+// caches responses. See worker/overpass.ts.
+const OVERPASS_PROXY = "/api/overpass"
 
 // Area limit — self-imposed soft cap. Overpass itself has no hard area limit;
 // dense cities may still be slow for very large areas.
 const MAX_AREA_KM2 = 50
-const OVERPASS_TIMEOUT_MS = 180000 // 3 minutes
+// Three mirrors at up to 45s each, plus overhead.
+const OVERPASS_TIMEOUT_MS = 170000
 
 export function FilePanel() {
 	const { remote } = useOsm()
-	const { dataset, isLoading, progress, error } = useOsmStore()
+	const { dataset, isLoading, progress, error, hasEdits } = useOsmStore()
+	const { unload, isUnloading } = useUnloadDataset()
+	/** Two-step confirm, only armed when there are unsaved tag edits to lose. */
+	const [confirmUnload, setConfirmUnload] = useState(false)
 	const setActiveTab = useUIStore((s) => s.setActiveTab)
 	const isDrawingMode = useUIStore((s) => s.isDrawingMode)
 	const setDrawingMode = useUIStore((s) => s.setDrawingMode)
@@ -233,6 +243,11 @@ export function FilePanel() {
 		}
 	}, [remote, setActiveTab])
 
+	const handleUnload = useCallback(async () => {
+		await unload()
+		setConfirmUnload(false)
+	}, [unload])
+
 	const startDrawingMode = useCallback(() => {
 		if (useOsmStore.getState().dataset) {
 			console.log("[FilePanel] Drawing mode blocked: file already loaded")
@@ -273,32 +288,37 @@ export function FilePanel() {
 		store.setError(null)
 
 		try {
-			// timeout + maxsize hints sent to Overpass server-side
-			const query = `[out:xml][timeout:180][maxsize:134217728][bbox:${drawnBbox.minLat},${drawnBbox.minLon},${drawnBbox.maxLat},${drawnBbox.maxLon}];
-way["highway"];
-out geom;`
-
+			// Only the bounding box is sent: the Worker builds the query, so this
+			// route cannot be used as a general-purpose Overpass gateway.
 			const controller = new AbortController()
 			const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS)
 
 			setOverpassStage("downloading")
-			const response = await fetch(OVERPASS_API, {
+			const response = await fetch(OVERPASS_PROXY, {
 				method: "POST",
-				headers: { "Content-Type": "application/x-www-form-urlencoded" },
-				body: `data=${encodeURIComponent(query)}`,
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					bbox: [drawnBbox.minLon, drawnBbox.minLat, drawnBbox.maxLon, drawnBbox.maxLat],
+				}),
 				signal: controller.signal,
 			})
 
 			clearTimeout(timeoutId)
 
 			if (!response.ok) {
+				// The Worker reports which mirror said what, so pass that through
+				// instead of replacing it with a generic status message.
+				const detail = await response
+					.json()
+					.then((body: unknown) => (body as { error?: string }).error ?? null)
+					.catch(() => null)
+				if (response.status === 413) {
+					throw new Error(detail ?? "Area too large. Try a smaller area.")
+				}
 				if (response.status === 429) {
-					throw new Error("Overpass API rate limited. Please wait a moment and try again.")
+					throw new Error(detail ?? "Rate limited. Please wait a moment and try again.")
 				}
-				if (response.status === 504) {
-					throw new Error("Overpass API server timeout. Try a smaller area or try again later.")
-				}
-				throw new Error(`Overpass API error: ${response.status} ${response.statusText}`)
+				throw new Error(detail ?? `Overpass request failed: ${response.status} ${response.statusText}`)
 			}
 
 			// Stream the response to get byte progress
@@ -399,20 +419,70 @@ out geom;`
 			<h2 className="text-sm font-semibold text-zinc-300">Load OSM Data</h2>
 
 			{isLocked && (
-				<div className="rounded-lg border border-amber-500/30 bg-amber-900/20 p-3">
-					<div className="flex items-center gap-2 text-amber-400">
-						<Lock className="h-4 w-4" />
-						<span className="text-xs font-medium">Upload Locked</span>
+				<div className="rounded-lg border border-zinc-700/60 bg-zinc-800/40 p-3">
+					<div className="flex items-center gap-2 text-zinc-300">
+						<Trash2 className="h-4 w-4 text-zinc-400" />
+						<span className="text-xs font-medium">One dataset at a time</span>
 					</div>
-					<p className="mt-1 text-[10px] text-amber-300/70">
-						File already loaded. Refresh page to load a new file.
+					<p className="mt-1 text-[10px] text-zinc-500">
+						Remove the loaded dataset to open another file, a sample, or a
+						different area from OSM.
 					</p>
+
+					{hasEdits && !confirmUnload && (
+						<p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-300/80">
+							<AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+							<span>
+								Tag edits are only in memory. Export a PBF first if you want to
+								keep them.
+							</span>
+						</p>
+					)}
+
+					{confirmUnload ? (
+						<div className="mt-2 flex items-center gap-2">
+							<button
+								onClick={handleUnload}
+								disabled={isUnloading}
+								className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-red-600/80 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-500 disabled:opacity-50"
+							>
+								{isUnloading ? (
+									<><Loader2 className="h-3.5 w-3.5 animate-spin" /> Removing...</>
+								) : (
+									<><Trash2 className="h-3.5 w-3.5" /> Yes, remove{hasEdits ? ' and lose edits' : ''}</>
+								)}
+							</button>
+							<button
+								onClick={() => setConfirmUnload(false)}
+								disabled={isUnloading}
+								className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-zinc-600 disabled:opacity-50"
+							>
+								Cancel
+							</button>
+						</div>
+					) : (
+						<button
+							onClick={() => {
+								// Nothing to lose on a freshly loaded file: unload straight away.
+								if (hasEdits) setConfirmUnload(true)
+								else void unload()
+							}}
+							disabled={isUnloading}
+							className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-700 disabled:opacity-50"
+						>
+							{isUnloading ? (
+								<><Loader2 className="h-3.5 w-3.5 animate-spin" /> Removing...</>
+							) : (
+								<><Trash2 className="h-3.5 w-3.5" /> Remove dataset</>
+							)}
+						</button>
+					)}
 				</div>
 			)}
 
 			<FileDropZone
 				accept=".pbf,.osm.pbf,.osm,.geojson,.json,.gpx,.kml,.kmz,.zip,.parquet,.geoparquet"
-				label={isLocked ? "File already loaded" : "Drop file here or click to browse"}
+				label={isLocked ? "Remove the loaded dataset first" : "Drop file here or click to browse"}
 				onFile={handleFile}
 				disabled={isLoading || !remote || isLocked}
 			/>
@@ -502,7 +572,7 @@ out geom;`
 							disabled={isLoading || !remote || overpassLoading || isLocked}
 							className="w-full rounded-md bg-green-600/20 px-3 py-2 text-xs font-medium text-green-400 transition-colors hover:bg-green-600/30 disabled:opacity-50"
 						>
-							{isLocked ? "File already loaded" : "Draw Area on Map"}
+							{isLocked ? "Remove the loaded dataset first" : "Draw Area on Map"}
 						</button>
 					</>
 				)}

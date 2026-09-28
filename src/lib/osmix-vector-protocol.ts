@@ -51,6 +51,11 @@ export function osmixIdToTileUrl(osmId: string) {
  * Register the minimum zoom for an osmId.
  * Tiles below this zoom return null immediately without calling the worker.
  */
+/** Forget a dataset's min zoom once it has been unloaded. */
+export function clearOsmixVectorMinZoom(osmId: string): void {
+	osmMinZoomMap.delete(osmId)
+}
+
 export function setOsmixVectorMinZoom(osmId: string, minZoom: number) {
 	osmMinZoomMap.set(osmId, minZoom)
 }
@@ -75,8 +80,6 @@ export function addOsmixVectorProtocol() {
 			if (zoom < minZoom) {
 				return { data: null }
 			}
-
-			console.log(`[vector-protocol] Request: ${osmId}/${zoom}/${tileIndex[0]}/${tileIndex[1]}`)
 
 			const remote = getOsmRemote()
 			if (!remote) {
