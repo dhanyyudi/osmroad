@@ -6,6 +6,7 @@ import { Plus, Trash2, Save, Edit3, Loader2, CheckCircle } from "lucide-react"
 export function EditPanel() {
 	const entity = useOsmStore((s) => s.selectedEntity)
 	const selectEntity = useOsmStore((s) => s.selectEntity)
+	const markEdited = useOsmStore((s) => s.markEdited)
 	const { remote } = useOsm()
 	const dataset = useOsmStore((s) => s.dataset)
 	const [editingTags, setEditingTags] = useState<Record<string, string>>({})
@@ -40,6 +41,10 @@ export function EditPanel() {
 					editingTags,
 				)
 
+			// The edit now lives only in the worker's Osm index; it reaches disk
+			// when the user exports a PBF. Unloading before that loses it.
+			markEdited()
+
 			// Update UI state
 			selectEntity({ ...entity, tags: editingTags })
 			setIsEditing(false)
@@ -51,7 +56,7 @@ export function EditPanel() {
 		} finally {
 			setSaving(false)
 		}
-	}, [entity, remote, dataset, editingTags, selectEntity])
+	}, [entity, remote, dataset, editingTags, selectEntity, markEdited])
 
 	const addTag = useCallback(() => {
 		if (newKey.trim()) {

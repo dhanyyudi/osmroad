@@ -31,7 +31,7 @@ Visit **[osmroad.gislabs.workers.dev](https://osmroad.gislabs.workers.dev)** to 
 - **Entity Search** — Search by ID (`way/123`, `node/456`) or tag value (`highway=primary`)
 - **Access Restrictions Layer** — Visualize `motor_vehicle=no`, `access=no`, barriers
 - **Speed Data Overlay** — Load CSV speed data for traffic analysis
-- **Overpass API** — Draw bbox on map and fetch live OSM data from Overpass API
+- **Overpass API** — Draw a bbox on the map and fetch live OSM data, proxied through our own Worker so it is not at the mercy of one mirror or of CORS
 
 ### Editing & Export
 
@@ -87,7 +87,7 @@ Three ways to load data:
 
 1. **Upload PBF** — Drag & drop `.osm.pbf` onto the map, or use the File panel
 2. **Sample Data** — Load built-in samples: Bali (~14 MB), Singapore (~14 MB), Chinese Taipei (~71 MB), plus a GeoParquet build of Bali (~25 MB)
-3. **Overpass API** — Draw a bounding box on the map → fetch live data from OSM
+3. **Overpass API** — Draw a bounding box on the map → fetch live data from OSM (proxied by the Worker; up to ~50 km² of roads)
 
 > Samples are streamed from R2 by the Worker, not bundled as static assets.
 > Cloudflare caps a single static asset at 25 MiB and the Taipei extract alone is 75 MB.

@@ -26,6 +26,14 @@ interface OsmState {
 	error: string | null
 	highlightedWayIds: Set<number> // For AI query results
 	vectorTilesLoading: boolean // For vector tile generation progress
+	/**
+	 * True once a tag edit has been applied to the in-memory dataset.
+	 *
+	 * Edits live only in the worker's Osm index until the user exports a PBF, so
+	 * unloading a dataset throws them away. This flag is what makes the unload
+	 * button ask before doing that.
+	 */
+	hasEdits: boolean
 
 	setDataset: (dataset: OsmDataset | null) => void
 	selectEntity: (entity: SelectedEntity | null) => void
@@ -35,6 +43,9 @@ interface OsmState {
 	setHighlightedWayIds: (ids: Set<number>) => void
 	clearHighlightedWayIds: () => void
 	setVectorTilesLoading: (loading: boolean) => void
+	markEdited: () => void
+	/** Drop the loaded dataset and everything the UI derived from it. */
+	resetDataset: () => void
 }
 
 export const useOsmStore = create<OsmState>((set) => ({
@@ -45,8 +56,10 @@ export const useOsmStore = create<OsmState>((set) => ({
 	error: null,
 	highlightedWayIds: new Set<number>(),
 	vectorTilesLoading: false,
+	hasEdits: false,
 
-	setDataset: (dataset) => set({ dataset, error: null, vectorTilesLoading: true }),
+	// A fresh dataset starts clean; the previous dataset's edits are gone.
+	setDataset: (dataset) => set({ dataset, error: null, vectorTilesLoading: true, hasEdits: false }),
 	selectEntity: (entity) => set({ selectedEntity: entity }),
 	setLoading: (isLoading) => set({ isLoading }),
 	setProgress: (progress) => set({ progress }),
@@ -54,4 +67,16 @@ export const useOsmStore = create<OsmState>((set) => ({
 	setHighlightedWayIds: (ids) => set({ highlightedWayIds: ids }),
 	clearHighlightedWayIds: () => set({ highlightedWayIds: new Set<number>() }),
 	setVectorTilesLoading: (loading) => set({ vectorTilesLoading: loading }),
+	markEdited: () => set({ hasEdits: true }),
+	resetDataset: () =>
+		set({
+			dataset: null,
+			selectedEntity: null,
+			isLoading: false,
+			progress: null,
+			error: null,
+			highlightedWayIds: new Set<number>(),
+			vectorTilesLoading: false,
+			hasEdits: false,
+		}),
 }))
