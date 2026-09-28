@@ -47,7 +47,7 @@ interface AIQueryState {
 	// Message Actions
 	addMessage: (message: Omit<QueryMessage, 'id' | 'timestamp'>) => void
 	addUserMessage: (content: string) => void
-	addAssistantMessage: (content: string, sql?: string) => void
+	addAssistantMessage: (content: string, sql?: string, results?: QueryResults) => void
 	addSystemMessage: (content: string) => void
 	addErrorMessage: (content: string) => void
 	clearMessages: () => void

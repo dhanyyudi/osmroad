@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useOsmStore } from '@/stores/osm-store'
 import { getOsmRemote } from './use-osm'
 import { useDuckDB } from './use-duckdb'
+import { isOsmBackedFormat } from '@/lib/format-converter'
 
 /**
  * Sync OSM data to DuckDB for AI Query
@@ -30,8 +31,9 @@ export function useOsmDuckDBSync() {
 			return
 		}
 
-		// DuckDB sync is OSM-only (requires highway tags for schema)
-		if (dataset.format && dataset.format !== "pbf" && dataset.format !== "osm") {
+		// The sync builds a `roads` table out of highway-tagged ways, so it needs
+		// an OSM-backed dataset. GeoParquet qualifies.
+		if (!isOsmBackedFormat(dataset.format)) {
 			setIsSynced(false)
 			setProgress(0)
 			return
@@ -42,7 +44,6 @@ export function useOsmDuckDBSync() {
 		setProgress(0)
 		cancelRef.current = false
 
-		const nodeCount = dataset.info.stats.nodes
 		const wayCount = dataset.info.stats.ways
 		
 		// For large files, skip DuckDB sync and use worker queries directly

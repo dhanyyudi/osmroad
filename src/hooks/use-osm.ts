@@ -1,75 +1,270 @@
 import { useEffect, useState } from "react"
-import { OsmixRemote } from "osmix"
+import type { OsmInfo } from "@osmix/core"
 import * as Comlink from "comlink"
 import type { Progress } from "@osmix/shared/progress"
-import type { VizWorker } from "../workers/osm.worker"
+import type {
+	QueryFilter,
+	QueryOptions,
+	QueryResult,
+	RoadRecord,
+} from "../workers/query-processor"
 import { useOsmStore, type ExtendedProgress, type LoadingStage } from "../stores/osm-store"
 
-// Module-level singleton
-let _remote: OsmixRemote<VizWorker> | null = null
-let _initPromise: Promise<OsmixRemote<VizWorker>> | null = null
+type AggregateOp = "sum" | "avg" | "min" | "max"
+type AggregateField = "length_meters"
 
-// Progress tracking for ETA calculation
-let progressHistory: Array<{ timestamp: number; bytes: number }> = []
-const MAX_HISTORY = 10
+/**
+ * The main thread talks to the worker through Comlink only.
+ *
+ * It deliberately does NOT import `osmix` here: that package's entry point
+ * re-exports every @osmix/* subpackage (pbf, vt, raster, router, change,
+ * geoparquet, shapefile, gtfs…) plus the worker implementation, which pulled
+ * roughly a third of the production bundle onto the main thread for a class
+ * whose methods this file overrode anyway. Only `OsmInfo` is imported, and only
+ * as a type, so it is erased at build time.
+ */
 
-export function getOsmRemote(): OsmixRemote<VizWorker> | null {
+export interface GeoParquetExportOptions {
+	/** Export only highway ways instead of every way. Defaults to true. */
+	roadsOnly?: boolean
+	/** Include tagged standalone nodes as Point features. Defaults to true. */
+	includeNodes?: boolean
+	compression?: "SNAPPY" | "UNCOMPRESSED" | "GZIP"
+}
+
+export interface GeoParquetExportResult {
+	bytes: Uint8Array
+	rowCount: number
+	skipped: number
+}
+
+// ── Domain shapes returned by the worker ─────────────────────────────────────
+// Declared structurally so the main thread never has to import osmix.
+
+export interface WorkerOsmEntity {
+	id: number
+	tags?: Record<string, string>
+	/** Present on node results only. */
+	lon?: number
+	lat?: number
+}
+
+export interface SearchHits {
+	nodes: WorkerOsmEntity[]
+	ways: WorkerOsmEntity[]
+	relations: WorkerOsmEntity[]
+}
+
+export interface RestrictionRecord {
+	id: number
+	tags: Record<string, string>
+	members: Array<{ type: "node" | "way" | "relation"; ref: number; role: string }>
+	viaCoords: [number, number] | null
+	fromWayCoords: Array<[number, number]>
+	toWayCoords: Array<[number, number]>
+}
+
+export interface AccessBlockedWay {
+	id: number
+	tags: Record<string, string>
+	coords: Array<[number, number]>
+	accessTag: string
+}
+
+export interface BarrierNode {
+	id: number
+	tags: Record<string, string>
+	coords: [number, number]
+}
+
+export interface RoutableNode {
+	nodeIndex: number
+	coordinates: [number, number]
+	distance: number
+}
+
+export interface RouteSegment {
+	name?: string
+	highway?: string
+	distance: number
+	time: number
+}
+
+export interface RouteResultShape {
+	coordinates: Array<[number, number]>
+	segments: RouteSegment[]
+	distance: number
+	time: number
+}
+
+/** The subset of VizWorker the UI actually calls. */
+interface VizWorkerApi {
+	fromPbf(input: {
+		data: ArrayBufferLike | ReadableStream<Uint8Array>
+		options?: Record<string, unknown>
+	}): Promise<OsmInfo>
+	fromGeoJSON(input: {
+		data: ArrayBufferLike | ReadableStream<Uint8Array>
+		options?: Record<string, unknown>
+	}): Promise<OsmInfo>
+	fromGeoParquet(input: {
+		data: ArrayBuffer | string | URL
+		options?: Record<string, unknown>
+	}): Promise<OsmInfo>
+	getVectorTile(id: string, tile: [number, number, number]): ArrayBuffer
+	/**
+	 * `opts` mirrors osmix's DrawToRasterTileOptions (tile size, line/point
+	 * colours). Declared structurally on purpose: importing the real type would
+	 * mean pulling `osmix` onto the main thread, which is what this module
+	 * exists to avoid. osmix accepts an RGBA tuple or a Uint8ClampedArray.
+	 */
+	getRasterTile(
+		id: string,
+		tile: [number, number, number],
+		opts?: {
+			tileSize?: number
+			lineColor?: [number, number, number, number] | Uint8ClampedArray
+			pointColor?: [number, number, number, number] | Uint8ClampedArray
+		},
+	): Uint8ClampedArray<ArrayBuffer>
+	toPbf(id: string): Uint8Array
+	exportRoadsPbf(id: string): Uint8Array
+	exportGeoParquet(id: string, options?: GeoParquetExportOptions): GeoParquetExportResult
+	search(id: string, key: string, val?: string): SearchHits
+	getEntityTags(
+		osmId: string,
+		entityType: "node" | "way" | "relation",
+		entityId: number,
+	): Record<string, string> | null
+	editEntityTags(
+		osmId: string,
+		entityType: "node" | "way" | "relation",
+		entityId: number,
+		newTags: Record<string, string>,
+	): OsmInfo
+	getRestrictions(osmId: string): RestrictionRecord[]
+	getAccessBlockedWays(osmId: string): AccessBlockedWay[]
+	getBarrierNodes(osmId: string): BarrierNode[]
+	getHighwayWayIds(osmId: string): number[]
+	getWayGeometries(
+		osmId: string,
+		wayIds: number[],
+	): Array<{ wayId: number; coords: Array<[number, number]>; highway: string }>
+	getBatchWayCoords(
+		osmId: string,
+		wayIds: number[],
+	): Array<{ id: number; coords: Array<[number, number]> }>
+	getWayCoords(osmId: string, wayId: number): Array<[number, number]> | null
+	getNodeCoords(osmId: string, nodeId: number): [number, number] | null
+	exportRoadsData(osmId: string): RoadRecord[]
+	executeQuery(osmId: string, filter: QueryFilter, options?: QueryOptions): QueryResult
+	executeCount(osmId: string, filter: QueryFilter): number
+	executeAggregate(
+		osmId: string,
+		filter: QueryFilter,
+		aggregate: AggregateOp,
+		field: AggregateField,
+	): number
+	parseQuery(query: string): QueryFilter
+	findNearestRoutableNode(
+		osmId: string,
+		point: [number, number],
+		maxDistanceM: number,
+	): RoutableNode | null
+	route(
+		osmId: string,
+		fromIndex: number,
+		toIndex: number,
+		options?: Record<string, unknown>,
+	): RouteResultShape | null
+	buildRoutingGraph(osmId: string): { nodeCount: number; edgeCount: number }
+	addProgressListener(listener: (progress: Progress) => void): void
+}
+
+/** Comlink turns every worker method into an async call. */
+export type VizWorkerProxy = {
+	[K in keyof VizWorkerApi]: VizWorkerApi[K] extends (...args: infer A) => infer R
+		? (...args: A) => Promise<Awaited<R>>
+		: never
+}
+
+export type OsmInput = ArrayBufferLike | ReadableStream<Uint8Array> | Uint8Array | File
+
+/** Convenience shape used by panels: `remote.getWorker().anything()`. */
+export interface VizRemote {
+	fromPbf(data: OsmInput, options?: Record<string, unknown>): Promise<OsmInfo>
+	fromGeoJSON(data: OsmInput, options?: Record<string, unknown>): Promise<OsmInfo>
+	fromGeoParquet(data: ArrayBuffer | File, options?: Record<string, unknown>): Promise<OsmInfo>
+	getVectorTile(osmId: unknown, tile: [number, number, number]): Promise<ArrayBuffer>
+	toPbfData(osmId: unknown): Promise<Uint8Array>
+	exportRoadsPbf(osmId: unknown): Promise<Uint8Array>
+	exportGeoParquet(
+		osmId: unknown,
+		options?: GeoParquetExportOptions,
+	): Promise<GeoParquetExportResult>
+	search(osmId: unknown, key: string, val?: string): Promise<SearchHits>
+	findNearestRoutableNode(
+		osmId: unknown,
+		point: [number, number],
+		maxDistanceM: number,
+	): Promise<RoutableNode | null>
+	route(
+		osmId: unknown,
+		fromIndex: number,
+		toIndex: number,
+		options?: Record<string, unknown>,
+	): Promise<RouteResultShape | null>
+	getWorker(): VizWorkerProxy
+}
+
+// ── Module-level singleton ───────────────────────────────────────────────────
+
+let _remote: VizRemote | null = null
+let _initPromise: Promise<VizRemote> | null = null
+
+/** Byte size of the file currently loading, used for ETA maths. */
+let _bytesTotal: number | undefined
+
+export function getOsmRemote(): VizRemote | null {
 	return _remote
 }
 
+// ── Progress plumbing ────────────────────────────────────────────────────────
+
+let progressHistory: Array<{ timestamp: number; bytes: number }> = []
+const MAX_HISTORY = 10
+
 /**
- * Detect loading stage from progress message
+ * Identifies the load that currently owns the progress channel. Progress
+ * events from a superseded load are dropped so a slow abandoned parse cannot
+ * overwrite the live one's UI.
  */
+let activeLoadToken: symbol | null = null
+
 function detectStage(msg: string | undefined): LoadingStage {
 	if (!msg) return "parsing"
-	const lowerMsg = msg.toLowerCase()
-	
-	if (lowerMsg.includes("download") || lowerMsg.includes("fetch")) {
-		return "downloading"
-	}
-	if (lowerMsg.includes("parse") || lowerMsg.includes("read") || lowerMsg.includes("decoding")) {
-		return "parsing"
-	}
-	if (lowerMsg.includes("index") || lowerMsg.includes("build") || lowerMsg.includes("spatial")) {
-		return "indexing"
-	}
-	if (lowerMsg.includes("tile") || lowerMsg.includes("vector") || lowerMsg.includes("encoder")) {
-		return "building-tiles"
-	}
-	if (lowerMsg.includes("complete") || lowerMsg.includes("done") || lowerMsg.includes("finished")) {
-		return "complete"
-	}
-	
-	// Default based on common patterns
-	if (lowerMsg.includes("node") || lowerMsg.includes("way")) {
-		return "parsing"
-	}
-	
+	const lower = msg.toLowerCase()
+	if (lower.includes("download") || lower.includes("fetch")) return "downloading"
+	if (lower.includes("parse") || lower.includes("read") || lower.includes("decoding")) return "parsing"
+	if (lower.includes("index") || lower.includes("build") || lower.includes("spatial")) return "indexing"
+	if (lower.includes("tile") || lower.includes("vector") || lower.includes("encoder")) return "building-tiles"
+	if (lower.includes("complete") || lower.includes("done") || lower.includes("finished")) return "complete"
 	return "parsing"
 }
 
-/**
- * Calculate progress percentage from message
- */
 function calculatePercent(msg: string | undefined, stage: LoadingStage): number {
-	if (!msg) return 50
-	// Try to extract percentage from message
-	const percentMatch = msg.match(/(\d+(?:\.\d+)?)%/)
-	if (percentMatch) {
-		return Math.min(100, Math.max(0, parseFloat(percentMatch[1])))
-	}
-	
-	// Try to extract "X of Y" pattern
-	const ofMatch = msg.match(/(\d+)\s*\/\s*(\d+)/)
-	if (ofMatch) {
-		const current = parseInt(ofMatch[1], 10)
-		const total = parseInt(ofMatch[2], 10)
-		if (total > 0) {
-			return Math.min(100, Math.max(0, (current / total) * 100))
+	if (msg) {
+		const percentMatch = msg.match(/(\d+(?:\.\d+)?)%/)
+		if (percentMatch?.[1]) return Math.min(100, Math.max(0, parseFloat(percentMatch[1])))
+
+		const ofMatch = msg.match(/(\d+)\s*\/\s*(\d+)/)
+		if (ofMatch?.[1] && ofMatch[2]) {
+			const current = parseInt(ofMatch[1], 10)
+			const total = parseInt(ofMatch[2], 10)
+			if (total > 0) return Math.min(100, Math.max(0, (current / total) * 100))
 		}
 	}
-	
-	// Default progress based on stage
+
 	const stageDefaults: Record<LoadingStage, number> = {
 		downloading: 30,
 		parsing: 50,
@@ -77,304 +272,221 @@ function calculatePercent(msg: string | undefined, stage: LoadingStage): number 
 		"building-tiles": 90,
 		complete: 100,
 	}
-	
 	return stageDefaults[stage]
 }
 
-/**
- * Calculate ETA based on progress history
- */
 function calculateETA(bytesLoaded: number, bytesTotal: number): number | undefined {
-	if (!bytesTotal || bytesTotal <= 0 || bytesLoaded <= 0) {
-		return undefined
-	}
-	
-	const now = Date.now()
-	progressHistory.push({ timestamp: now, bytes: bytesLoaded })
-	
-	// Keep only recent history
-	if (progressHistory.length > MAX_HISTORY) {
-		progressHistory.shift()
-	}
-	
-	// Need at least 2 data points
-	if (progressHistory.length < 2) {
-		return undefined
-	}
-	
+	if (!bytesTotal || bytesTotal <= 0 || bytesLoaded <= 0) return undefined
+
+	progressHistory.push({ timestamp: Date.now(), bytes: bytesLoaded })
+	if (progressHistory.length > MAX_HISTORY) progressHistory.shift()
+	if (progressHistory.length < 2) return undefined
+
 	const first = progressHistory[0]
 	const last = progressHistory[progressHistory.length - 1]
 	if (!first || !last) return undefined
-	const timeDiff = (last.timestamp - first.timestamp) / 1000 // seconds
-	const bytesDiff = last.bytes - first.bytes
-	
-	if (timeDiff <= 0 || bytesDiff <= 0) {
-		return undefined
-	}
-	
-	const bytesPerSecond = bytesDiff / timeDiff
-	const bytesRemaining = bytesTotal - bytesLoaded
-	
-	return Math.ceil(bytesRemaining / bytesPerSecond)
+
+	const seconds = (last.timestamp - first.timestamp) / 1000
+	const delta = last.bytes - first.bytes
+	if (seconds <= 0 || delta <= 0) return undefined
+
+	return Math.ceil((bytesTotal - bytesLoaded) / (delta / seconds))
 }
 
-/**
- * Transform osmix Progress to ExtendedProgress with stages
- */
-function transformProgress(
-	progress: Progress,
-	bytesTotal?: number,
-): ExtendedProgress {
+function transformProgress(progress: Progress, bytesTotal?: number): ExtendedProgress {
 	const stage = detectStage(progress.msg)
 	const percent = calculatePercent(progress.msg, stage)
-	
-	// Extract bytes loaded from message if possible
+
 	let bytesLoaded: number | undefined
 	const bytesMatch = progress.msg.match(/(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)/i)
-	if (bytesMatch) {
+	if (bytesMatch?.[1] && bytesMatch[2]) {
 		const value = parseFloat(bytesMatch[1])
-		const unit = bytesMatch[2].toUpperCase()
 		const multipliers: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3 }
-		bytesLoaded = value * (multipliers[unit] || 1)
+		bytesLoaded = value * (multipliers[bytesMatch[2].toUpperCase()] ?? 1)
 	}
-	
-	const eta = bytesTotal && bytesLoaded ? calculateETA(bytesLoaded, bytesTotal) : undefined
-	
+
 	return {
 		...progress,
 		stage,
 		percent,
 		bytesLoaded,
 		bytesTotal,
-		etaSeconds: eta,
+		etaSeconds: bytesTotal && bytesLoaded ? calculateETA(bytesLoaded, bytesTotal) : undefined,
 	}
 }
 
-/**
- * Create the VizWorker using the `new Worker(new URL(...))` pattern
- * so Vite bundles it for production. Then initialize OsmixRemote
- * with the pre-created worker.
- */
-async function initRemote(): Promise<OsmixRemote<VizWorker>> {
+// ── Transfer helpers ─────────────────────────────────────────────────────────
+
+/** Feature-detect transferable ReadableStreams (fails without cross-origin isolation). */
+function supportsStreamTransfer(): boolean {
+	if (typeof ReadableStream === "undefined" || typeof MessageChannel === "undefined") return false
+	try {
+		const { port1, port2 } = new MessageChannel()
+		const stream = new ReadableStream()
+		port1.postMessage(stream, [stream])
+		port1.close()
+		port2.close()
+		return true
+	} catch {
+		return false
+	}
+}
+
+const STREAM_TRANSFER_OK = supportsStreamTransfer()
+
+/** Comlink.transfer with transferables collected from a nested payload. */
+function transferOf(value: unknown): never {
+	const transferables: Transferable[] = []
+	const collect = (item: unknown): void => {
+		if (item instanceof ArrayBuffer || item instanceof ReadableStream) {
+			transferables.push(item as Transferable)
+		} else if (ArrayBuffer.isView(item)) {
+			transferables.push(item.buffer as ArrayBuffer)
+		} else if (Array.isArray(item)) {
+			for (const child of item) collect(child)
+		} else if (item && typeof item === "object") {
+			for (const child of Object.values(item)) collect(child)
+		}
+	}
+	collect(value)
+	return Comlink.transfer(value, transferables) as never
+}
+
+function toId(osmId: unknown): string {
+	if (typeof osmId === "string") return osmId
+	if (osmId && typeof osmId === "object" && "id" in osmId) return String((osmId as { id: string }).id)
+	return String(osmId)
+}
+
+// ── Worker bootstrap ─────────────────────────────────────────────────────────
+
+async function initRemote(): Promise<VizRemote> {
 	if (_remote) return _remote
 	if (_initPromise) return _initPromise
 
 	_initPromise = (async () => {
-		// Vite detects this pattern and bundles the worker as a separate chunk
-		const rawWorker = new Worker(
-			new URL("../workers/osm.worker.ts", import.meta.url),
-			{ type: "module" },
-		)
-		const workerProxy = Comlink.wrap<VizWorker>(rawWorker)
+		// Vite detects this pattern and bundles the worker as a separate chunk.
+		const rawWorker = new Worker(new URL("../workers/osm.worker.ts", import.meta.url), {
+			type: "module",
+		})
+		const worker = Comlink.wrap<VizWorkerApi>(rawWorker) as unknown as VizWorkerProxy
 
-		// Register progress listener with transformation
-		await workerProxy.addProgressListener(
+		// Registered exactly once. The previous implementation re-registered a
+		// listener on every load, so the Nth load ran N callbacks per progress
+		// event — each with its own ETA history against a different total.
+		await worker.addProgressListener(
 			Comlink.proxy((progress: Progress) => {
-				const extended = transformProgress(progress)
-				useOsmStore.getState().setProgress(extended)
+				if (activeLoadToken === null) return
+				useOsmStore.getState().setProgress(transformProgress(progress, _bytesTotal))
 			}),
 		)
 
-		// Build OsmixRemote that delegates everything to our single worker
-		const remote = new Proxy(
-			new OsmixRemote<VizWorker>(),
-			{
-				get(target, prop, receiver) {
-					// Override getWorker to return our pre-created worker
-					if (prop === "getWorker") {
-						return () => workerProxy
+		/** Owns the progress channel for the duration of one load. */
+		const withLoad = async <T>(
+			byteLength: number | undefined,
+			run: () => Promise<T>,
+		): Promise<T> => {
+			const token: symbol = Symbol("load")
+			activeLoadToken = token
+			progressHistory = []
+			_bytesTotal = byteLength
+			try {
+				return await run()
+			} finally {
+				if (activeLoadToken === token) {
+					activeLoadToken = null
+					progressHistory = []
+					_bytesTotal = undefined
+				}
+			}
+		}
+
+		/**
+		 * Hand a File to the worker as a transferable stream when the browser
+		 * supports it, so the main thread never materialises the whole extract.
+		 * Returns the payload plus whether it was streamed.
+		 */
+		const streamedPayload = (data: OsmInput): {
+			payload: ArrayBufferLike | ReadableStream<Uint8Array>
+			byteLength?: number
+			streamed: boolean
+		} => {
+			if (data instanceof File) {
+				if (STREAM_TRANSFER_OK) {
+					const stream = data.stream()
+					return { payload: stream, byteLength: data.size, streamed: true }
+				}
+				return { payload: undefined as never, byteLength: data.size, streamed: false }
+			}
+			if (data instanceof ReadableStream) {
+				return { payload: data, streamed: true }
+			}
+			if (
+				data instanceof ArrayBuffer ||
+				(typeof SharedArrayBuffer !== "undefined" && data instanceof SharedArrayBuffer)
+			) {
+				return { payload: data, byteLength: data.byteLength, streamed: false }
+			}
+			if (ArrayBuffer.isView(data)) {
+				return { payload: data.buffer as ArrayBuffer, byteLength: data.byteLength, streamed: false }
+			}
+			return { payload: data as ArrayBufferLike, streamed: false }
+		}
+
+		const remote: VizRemote = {
+			async fromPbf(data, options = {}) {
+				const prepared = streamedPayload(data)
+				return withLoad(prepared.byteLength, async () => {
+					if (prepared.streamed) {
+						return worker.fromPbf(transferOf({ data: prepared.payload, options }))
 					}
-
-					const value = Reflect.get(target, prop, receiver)
-					return value
-				},
+					// Buffered path: File without stream transfer, or a plain buffer.
+					const buffer = data instanceof File ? await data.arrayBuffer() : prepared.payload
+					return worker.fromPbf(transferOf({ data: buffer, options }))
+				})
 			},
-		) as unknown as OsmixRemote<VizWorker>
 
-		// Monkey-patch the remote to use our worker for all operations
-		const r = remote as unknown as Record<string, unknown>
+			async fromGeoJSON(data, options = {}) {
+				const prepared = streamedPayload(data)
+				return withLoad(prepared.byteLength, async () => {
+					if (prepared.streamed) {
+						return worker.fromGeoJSON(transferOf({ data: prepared.payload, options }))
+					}
+					const buffer = data instanceof File ? await data.arrayBuffer() : prepared.payload
+					return worker.fromGeoJSON(transferOf({ data: buffer, options }))
+				})
+			},
 
-		// Core data operations with progress tracking reset
-		r.fromPbf = async (
-			data: ArrayBufferLike | ReadableStream | Uint8Array | File,
-			options: Record<string, unknown> = {},
-		) => {
-			// Reset progress tracking
-			progressHistory = []
-			
-			// Get file size for progress calculation
-			let bytesTotal: number | undefined
-			if (data instanceof File) {
-				bytesTotal = data.size
-			} else if (data instanceof ArrayBuffer || data instanceof SharedArrayBuffer) {
-				bytesTotal = data.byteLength
-			} else if (data instanceof Uint8Array) {
-				bytesTotal = data.byteLength
-			}
-			
-			// Override progress listener to include file size
-			await workerProxy.addProgressListener(
-				Comlink.proxy((progress: Progress) => {
-					const extended = transformProgress(progress, bytesTotal)
-					useOsmStore.getState().setProgress(extended)
-				}),
-			)
-			
-			const transferable = await fileToBuffer(data)
-			const info = await workerProxy.fromPbf(
-				Comlink.transfer({ data: transferable, options }, [
-					transferable as ArrayBuffer,
-				]),
-			)
-			
-			// Clear progress tracking
-			progressHistory = []
-			
-			return info as Awaited<ReturnType<OsmixRemote<VizWorker>["fromPbf"]>>
+			async fromGeoParquet(data, options = {}) {
+				// hyparquet reads parquet by random access, so it needs a real
+				// ArrayBuffer rather than a stream.
+				const buffer = data instanceof File ? await data.arrayBuffer() : data
+				return withLoad(buffer.byteLength, () =>
+					worker.fromGeoParquet(transferOf({ data: buffer, options })),
+				)
+			},
+
+			getVectorTile: (osmId, tile) => worker.getVectorTile(toId(osmId), tile),
+			toPbfData: (osmId) => worker.toPbf(toId(osmId)),
+			exportRoadsPbf: (osmId) => worker.exportRoadsPbf(toId(osmId)),
+			exportGeoParquet: (osmId, options) => worker.exportGeoParquet(toId(osmId), options),
+			search: (osmId, key, val) => worker.search(toId(osmId), key, val),
+			findNearestRoutableNode: (osmId, point, maxDistanceM) =>
+				worker.findNearestRoutableNode(toId(osmId), point, maxDistanceM),
+			route: (osmId, fromIndex, toIndex, options) =>
+				worker.route(toId(osmId), fromIndex, toIndex, options),
+			getWorker: () => worker,
 		}
 
-		r.fromGeoJSON = async (
-			data: ArrayBufferLike | ReadableStream | Uint8Array | File,
-			options: Record<string, unknown> = {},
-		) => {
-			progressHistory = []
-
-			const transferable = await fileToBuffer(data)
-			const info = await workerProxy.fromGeoJSON(
-				Comlink.transfer({ data: transferable, options }, [
-					transferable as ArrayBuffer,
-				]),
-			)
-
-			progressHistory = []
-			return info as Awaited<ReturnType<OsmixRemote<VizWorker>["fromGeoJSON"]>>
-		}
-
-		r.fromGeoParquet = async (
-			data: ArrayBufferLike | File,
-			options: Record<string, unknown> = {},
-		) => {
-			progressHistory = []
-
-			let bytesTotal: number | undefined
-			if (data instanceof File) {
-				bytesTotal = data.size
-			} else if (data instanceof ArrayBuffer) {
-				bytesTotal = data.byteLength
-			}
-
-			await workerProxy.addProgressListener(
-				Comlink.proxy((progress: Progress) => {
-					const extended = transformProgress(progress, bytesTotal)
-					useOsmStore.getState().setProgress(extended)
-				}),
-			)
-
-			const transferable = (await fileToBuffer(data)) as ArrayBuffer
-			const info = await workerProxy.fromGeoParquet(
-				Comlink.transfer({ data: transferable, options }, [transferable]),
-			)
-
-			progressHistory = []
-			return info as Awaited<ReturnType<OsmixRemote<VizWorker>["fromGeoParquet"]>>
-		}
-
-		r.getVectorTile = (osmId: unknown, tile: [number, number, number]) => {
-			return workerProxy.getVectorTile(toId(osmId), tile)
-		}
-
-		r.toPbfData = (osmId: unknown) => {
-			return workerProxy.toPbf(toId(osmId))
-		}
-
-		r.exportRoadsPbf = (osmId: unknown) => {
-			return (workerProxy as any).exportRoadsPbf(toId(osmId))
-		}
-
-		r.search = (osmId: unknown, key: string, val?: string) => {
-			return workerProxy.search(toId(osmId), key, val)
-		}
-
-		r.waysGetById = (osmId: unknown, wayId: number) => {
-			return workerProxy.waysGetById(toId(osmId), wayId)
-		}
-
-		r.nodesGetById = (osmId: unknown, nodeId: number) => {
-			return workerProxy.nodesGetById(toId(osmId), nodeId)
-		}
-
-		r.relationsGetById = (osmId: unknown, relId: number) => {
-			return workerProxy.relationsGetById(toId(osmId), relId)
-		}
-
-		// Routing
-		r.findNearestRoutableNode = (
-			osmId: unknown,
-			point: [number, number],
-			maxDistanceM: number,
-		) => {
-			return workerProxy.findNearestRoutableNode(
-				toId(osmId),
-				point,
-				maxDistanceM,
-			)
-		}
-
-		r.route = (
-			osmId: unknown,
-			fromIndex: number,
-			toIndex: number,
-			options?: Record<string, unknown>,
-		) => {
-			return workerProxy.route(toId(osmId), fromIndex, toIndex, options)
-		}
-
-		r.buildRoutingGraph = (osmId: unknown) => {
-			return workerProxy.buildRoutingGraph(toId(osmId))
-		}
-
-		r.getWorker = () => workerProxy
-
-		_remote = remote as OsmixRemote<VizWorker>
-		return _remote
+		_remote = remote
+		return remote
 	})()
 
 	return _initPromise
 }
 
-function toId(osmId: unknown): string {
-	if (typeof osmId === "string") return osmId
-	if (osmId && typeof osmId === "object" && "id" in osmId)
-		return (osmId as { id: string }).id
-	return String(osmId)
-}
-
-async function fileToBuffer(
-	data: ArrayBufferLike | ReadableStream | Uint8Array | File,
-): Promise<ArrayBufferLike> {
-	if (data instanceof ArrayBuffer || data instanceof SharedArrayBuffer)
-		return data
-	if (data instanceof Uint8Array) return data.buffer as ArrayBuffer
-	if (data instanceof File) return data.arrayBuffer()
-	const reader = (data as ReadableStream<Uint8Array>).getReader()
-	const chunks: Uint8Array[] = []
-	for (;;) {
-		const { value, done } = await reader.read()
-		if (value) chunks.push(value)
-		if (done) break
-	}
-	const total = chunks.reduce((s, c) => s + c.length, 0)
-	const buf = new Uint8Array(total)
-	let off = 0
-	for (const c of chunks) {
-		buf.set(c, off)
-		off += c.length
-	}
-	return buf.buffer as ArrayBuffer
-}
-
 export function useOsm() {
-	const [remote, setRemote] = useState<OsmixRemote<VizWorker> | null>(_remote)
+	const [remote, setRemote] = useState<VizRemote | null>(_remote)
 	const [error, setError] = useState<string | null>(null)
 
 	useEffect(() => {

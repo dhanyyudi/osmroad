@@ -1,0 +1,8 @@
+# Local Worker secrets for `npm run cf-dev` / `wrangler dev`.
+# Copy to `.dev.vars` (gitignored) and fill in.
+#
+# The value is never committed. In production the same name is set with:
+#     npx wrangler secret put AI_API_KEY
+#
+# Leave it unset and the endpoint falls back to the Workers AI binding.
+AI_API_KEY=

@@ -3,11 +3,12 @@
  * Converts various geo formats to GeoJSON for ingestion via remote.fromGeoJSON()
  *
  * Supported: .osm, .geojson, .gpx, .kml, .kmz, .zip (shapefile)
+ *
+ * jszip, sheetjs-free shapefile and togeojson together are ~150 kB of parser
+ * that only matter to someone opening a .kmz or a zipped shapefile. They are
+ * imported inside the branch that needs them so a plain .osm.pbf load — by far
+ * the common case — never downloads any of it.
  */
-
-import * as toGeoJSON from "togeojson"
-import JSZip from "jszip"
-import * as shapefile from "shapefile"
 
 export type FileFormat =
 	| "pbf"
@@ -32,6 +33,32 @@ export function detectFormat(file: File): FileFormat {
 	if (name.endsWith(".parquet") || name.endsWith(".geoparquet")) return "parquet"
 	return "unknown"
 }
+
+/**
+ * Formats that load into a full OSM index, with entity tags intact.
+ *
+ * `parquet` belongs here. `@osmix/geoparquet` maps each LineString to a way and
+ * keeps its tags, so a GeoParquet tile carries exactly the same `highway`
+ * properties as the tile built from the source PBF — verified by decoding both.
+ * Everything it feeds therefore works unchanged: highway classification, the AI
+ * query roads table, and the roads-only export.
+ *
+ * The remaining formats are parsed down to plain GeoJSON, which has geometry and
+ * properties but no OSM entity model, so OSM-aware features must not claim them.
+ *
+ * This is a single definition on purpose: the same `format === "pbf" || format
+ * === "osm"` comparison had been copy-pasted into five places, and every one of
+ * them silently excluded GeoParquet.
+ */
+const OSM_BACKED_FORMATS: ReadonlySet<FileFormat> = new Set<FileFormat>(["pbf", "osm", "parquet"])
+
+/** A dataset with no recorded format is treated as OSM-backed (legacy datasets). */
+export function isOsmBackedFormat(format: FileFormat | undefined): boolean {
+	return format === undefined || OSM_BACKED_FORMATS.has(format)
+}
+
+/** Human-readable list for messages, kept in step with OSM_BACKED_FORMATS. */
+export const OSM_BACKED_FORMAT_LABEL = ".pbf, .osm and .geoparquet"
 
 export async function convertToGeoJSON(
 	file: File,
@@ -153,6 +180,7 @@ async function convertGeoJSON(file: File): Promise<GeoJSON.FeatureCollection> {
 
 // --- GPX ---
 async function convertGpx(file: File): Promise<GeoJSON.FeatureCollection> {
+	const toGeoJSON = await import("togeojson")
 	const text = await file.text()
 	const parser = new DOMParser()
 	const doc = parser.parseFromString(text, "application/xml")
@@ -163,6 +191,7 @@ async function convertGpx(file: File): Promise<GeoJSON.FeatureCollection> {
 
 // --- KML ---
 async function convertKml(file: File): Promise<GeoJSON.FeatureCollection> {
+	const toGeoJSON = await import("togeojson")
 	const text = await file.text()
 	const parser = new DOMParser()
 	const doc = parser.parseFromString(text, "application/xml")
@@ -173,6 +202,10 @@ async function convertKml(file: File): Promise<GeoJSON.FeatureCollection> {
 
 // --- KMZ (zipped KML) ---
 async function convertKmz(file: File): Promise<GeoJSON.FeatureCollection> {
+	const [{ default: JSZip }, toGeoJSON] = await Promise.all([
+		import("jszip"),
+		import("togeojson"),
+	])
 	const zip = await JSZip.loadAsync(file)
 	const kmlFile = Object.values(zip.files).find((f) => f.name.toLowerCase().endsWith(".kml"))
 	if (!kmlFile) throw new Error("No KML file found inside KMZ archive")
@@ -186,6 +219,10 @@ async function convertKmz(file: File): Promise<GeoJSON.FeatureCollection> {
 
 // --- Shapefile ZIP (.zip containing .shp + .dbf) ---
 async function convertShpZip(file: File): Promise<GeoJSON.FeatureCollection> {
+	const [{ default: JSZip }, shapefile] = await Promise.all([
+		import("jszip"),
+		import("shapefile"),
+	])
 	const zip = await JSZip.loadAsync(file)
 
 	const shpFile = Object.values(zip.files).find((f) => f.name.toLowerCase().endsWith(".shp"))

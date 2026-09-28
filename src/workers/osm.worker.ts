@@ -2,6 +2,10 @@ import { OsmChangeset, applyChangesetToOsm } from "@osmix/change"
 import { expose, transfer } from "comlink"
 import { Osm, toPbfBuffer, OsmixWorker } from "osmix"
 import {
+	encodeGeoParquet,
+	type GeoParquetFeature,
+} from "../lib/geoparquet-encode"
+import {
 	executeStreamingQuery,
 	executeCountQuery,
 	executeAggregateQuery,
@@ -11,6 +15,67 @@ import {
 	type QueryResult,
 	type RoadRecord,
 } from "./query-processor"
+
+export interface GeoParquetExportOptions {
+	roadsOnly?: boolean
+	includeNodes?: boolean
+	compression?: "SNAPPY" | "UNCOMPRESSED" | "GZIP"
+}
+
+export interface GeoParquetExportResult {
+	bytes: Uint8Array
+	rowCount: number
+	skipped: number
+}
+
+/** Earth radius in metres, for the haversine helper below. */
+const EARTH_RADIUS_M = 6_371_000
+
+function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+	const dLat = (lat2 - lat1) * (Math.PI / 180)
+	const dLon = (lon2 - lon1) * (Math.PI / 180)
+	const a =
+		Math.sin(dLat / 2) ** 2 +
+		Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) ** 2
+	return EARTH_RADIUS_M * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function toTagMap(tags: Record<string, unknown> | undefined): Record<string, string> {
+	const out: Record<string, string> = {}
+	if (!tags) return out
+	for (const [key, value] of Object.entries(tags)) out[key] = String(value)
+	return out
+}
+
+interface OsmWayLike {
+	id: number
+	refs: number[]
+	tags?: Record<string, unknown>
+}
+
+interface OsmNodeLookup {
+	nodes: { getById(id: number): { lon: number; lat: number } | null }
+}
+
+/** Build a LineString (or closed Polygon) for a way, or null if degenerate. */
+function wayGeometry(osm: OsmNodeLookup, way: OsmWayLike): GeoJSON.Geometry | null {
+	const coordinates: Array<[number, number]> = []
+	for (const ref of way.refs) {
+		const node = osm.nodes.getById(ref)
+		if (node) coordinates.push([node.lon, node.lat])
+	}
+	if (coordinates.length < 2) return null
+
+	const first = coordinates[0]
+	const last = coordinates[coordinates.length - 1]
+	const isClosed =
+		coordinates.length > 3 && first !== undefined && last !== undefined && first[0] === last[0] && first[1] === last[1]
+
+	if (isClosed && (way.tags?.building || way.tags?.landuse || way.tags?.natural || way.tags?.waterway || way.tags?.amenity)) {
+		return { type: "Polygon", coordinates: [coordinates] }
+	}
+	return { type: "LineString", coordinates }
+}
 
 /**
  * Simple LRU tile cache to avoid re-encoding identical tiles.
@@ -67,6 +132,8 @@ class TileCache {
  */
 export class VizWorker extends OsmixWorker {
 	private tileCache = new TileCache(512)
+	/** Memoised `exportRoadsData` result, keyed by dataset id. */
+	private roadsCache = new Map<string, RoadRecord[]>()
 	/**
 	 * Override getVectorTile with LRU cache.
 	 * The base class uses Comlink.transfer which detaches the buffer,
@@ -76,49 +143,47 @@ export class VizWorker extends OsmixWorker {
 		id: string,
 		tile: [number, number, number],
 	): ArrayBuffer {
-		console.log(`[worker] getVectorTile called: ${id}/${tile[2]}/${tile[0]}/${tile[1]}`)
-		
+		// NOTE: this runs once per visible tile on every pan/zoom. Logging here
+		// (as this method used to) costs more than the tile encoding it wraps.
 		const cached = this.tileCache.get(id, tile)
 		if (cached) {
-			console.log(`[worker] Cache hit: ${id}/${tile[2]}/${tile[0]}/${tile[1]}`)
 			// Return a copy — transfer detaches the buffer
 			const copy = cached.slice(0)
 			return transfer(copy, [copy]) as unknown as ArrayBuffer
 		}
 
-		// Check if encoder exists
-		const encoders = (this as any).vtEncoders
-		console.log(`[worker] Available encoders: ${encoders ? Object.keys(encoders).join(', ') : 'none'}`)
-		
-		const encoder = encoders?.[id]
-		if (!encoder) {
-			console.warn(`[worker] No vtEncoder for ${id}. Has osm data: ${!!this.get(id)}`)
-			return new ArrayBuffer(0)
-		}
+		const encoder = this.getEncoder(id)
+		if (!encoder) return new ArrayBuffer(0)
 
-		const startTime = performance.now()
 		try {
-			console.log(`[worker] Generating tile: ${id}/${tile[2]}/${tile[0]}/${tile[1]}`)
 			const data = encoder.getTile(tile)
-			const duration = performance.now() - startTime
-			
+
 			if (!data || data.byteLength === 0) {
-				console.log(`[worker] Empty tile (${duration.toFixed(1)}ms): ${id}/${tile[2]}/${tile[0]}/${tile[1]}`)
-				// Empty tile is normal for tiles outside data bounds
+				// Empty tiles are normal for tiles outside the data bounds.
 				return new ArrayBuffer(0)
 			}
 
-			console.log(`[worker] Generated tile (${duration.toFixed(1)}ms, ${data.byteLength} bytes): ${id}/${tile[2]}/${tile[0]}/${tile[1]}`)
-			
 			// Cache the original, transfer a copy
 			this.tileCache.set(id, tile, data)
 			const copy = data.slice(0)
 			return transfer(copy, [copy]) as unknown as ArrayBuffer
 		} catch (err) {
-			const duration = performance.now() - startTime
-			console.error(`[worker] Error (${duration.toFixed(1)}ms) generating tile ${id}/${tile[2]}/${tile[0]}/${tile[1]}:`, err)
+			console.error(`[worker] Tile encode failed ${id}/${tile[2]}/${tile[0]}/${tile[1]}:`, err)
 			return new ArrayBuffer(0)
 		}
+	}
+
+	/**
+	 * Resolve the vector-tile encoder for a loaded dataset.
+	 *
+	 * `vtEncoders` is private on OsmixWorker, so it is reached through a narrow
+	 * cast instead of an `any` — the base class owns this shape, not us.
+	 */
+	private getEncoder(id: string): { getTile(tile: [number, number, number]): ArrayBuffer } | undefined {
+		const encoders = (this as unknown as {
+			vtEncoders?: Record<string, { getTile(tile: [number, number, number]): ArrayBuffer }>
+		}).vtEncoders
+		return encoders?.[id]
 	}
 
 	/**
@@ -168,6 +233,7 @@ export class VizWorker extends OsmixWorker {
 		const newOsm = applyChangesetToOsm(changeset, osmId)
 		this.set(osmId, newOsm)
 		this.tileCache.invalidate(osmId)
+		this.roadsCache.delete(osmId)
 		return newOsm.info()
 	}
 
@@ -425,25 +491,19 @@ export class VizWorker extends OsmixWorker {
 	 * Export all ways (roads) data for AI Query
 	 * Returns array of road objects with all relevant properties
 	 */
-	exportRoadsData(osmId: string): Array<{
-		id: number
-		name: string | null
-		highway: string | null
-		length_meters: number
-		tags: Record<string, string>
-	}> {
+	exportRoadsData(osmId: string): RoadRecord[] {
+		// Building this walks every highway way and resolves every node ref, so
+		// it is memoised per dataset. AI Query used to rebuild it for each
+		// individual query, making a "count motorways" question O(all ways).
+		const cached = this.roadsCache.get(osmId)
+		if (cached) return cached
+
 		const osm = this.get(osmId)
-		const roads: Array<{
-			id: number
-			name: string | null
-			highway: string | null
-			length_meters: number
-			tags: Record<string, string>
-		}> = []
+		const roads: RoadRecord[] = []
 
 		// Get all ways with highway tag (roads)
 		const ways = osm.ways.search("highway")
-		
+
 		for (const way of ways) {
 			const tags: Record<string, string> = {}
 			if (way.tags) {
@@ -454,17 +514,16 @@ export class VizWorker extends OsmixWorker {
 
 			// Calculate length from coordinates
 			let lengthMeters = 0
-			const coords: Array<[number, number]> = []
+			let prevLon: number | null = null
+			let prevLat = 0
 			for (const nodeId of way.refs) {
 				const node = osm.nodes.getById(nodeId)
-				if (node) coords.push([node.lon, node.lat])
-			}
-			
-			// Simple haversine distance calculation
-			for (let i = 1; i < coords.length; i++) {
-				const [lon1, lat1] = coords[i - 1]
-				const [lon2, lat2] = coords[i]
-				lengthMeters += this.haversineDistance(lat1, lon1, lat2, lon2)
+				if (!node) continue
+				if (prevLon !== null) {
+					lengthMeters += haversineDistance(prevLat, prevLon, node.lat, node.lon)
+				}
+				prevLon = node.lon
+				prevLat = node.lat
 			}
 
 			roads.push({
@@ -476,26 +535,8 @@ export class VizWorker extends OsmixWorker {
 			})
 		}
 
+		this.roadsCache.set(osmId, roads)
 		return roads
-	}
-
-	/**
-	 * Calculate haversine distance between two points in meters
-	 */
-	private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-		const R = 6371000 // Earth's radius in meters
-		const toRad = (deg: number) => deg * (Math.PI / 180)
-		
-		const dLat = toRad(lat2 - lat1)
-		const dLon = toRad(lon2 - lon1)
-		
-		const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-			Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-			Math.sin(dLon / 2) * Math.sin(dLon / 2)
-		
-		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-		
-		return R * c
 	}
 
 	/**
@@ -570,6 +611,50 @@ export class VizWorker extends OsmixWorker {
 
 		const pbfBytes = await toPbfBuffer(filtered)
 		return transfer(pbfBytes, [pbfBytes.buffer]) as unknown as Uint8Array
+	}
+
+	/**
+	 * Export the loaded dataset as a GeoParquet file.
+	 *
+	 * GeoParquet stores geometry inline per feature, so it needs no node table
+	 * and can be read columnar by hyparquet, DuckDB, GeoPandas or QGIS. It is an
+	 * interchange format rather than a compaction win: for an extract that is
+	 * already filtered down to roads, a PBF is usually the smaller of the two.
+	 */
+	exportGeoParquet(
+		osmId: string,
+		options: GeoParquetExportOptions = {},
+	): GeoParquetExportResult {
+		const { roadsOnly = true, includeNodes = true, compression = "SNAPPY" } = options
+		const osm = this.get(osmId)
+		const features: GeoParquetFeature[] = []
+
+		const ways = roadsOnly ? osm.ways.search("highway") : Array.from(osm.ways)
+		for (const way of ways) {
+			const geometry = wayGeometry(osm, way)
+			if (!geometry) continue
+			features.push({ type: "way", id: way.id, tags: toTagMap(way.tags), geometry })
+		}
+
+		if (includeNodes) {
+			for (const node of osm.nodes) {
+				if (!node.tags) continue
+				const tags = toTagMap(node.tags)
+				if (Object.keys(tags).length === 0) continue
+				features.push({
+					type: "node",
+					id: node.id,
+					tags,
+					geometry: { type: "Point", coordinates: [node.lon, node.lat] },
+				})
+			}
+		}
+
+		const { bytes, rowCount, skipped } = encodeGeoParquet(features, { compression })
+		if (bytes.byteLength === 0) {
+			return { bytes, rowCount: 0, skipped }
+		}
+		return transfer({ bytes, rowCount, skipped }, [bytes.buffer]) as unknown as GeoParquetExportResult
 	}
 }
 

@@ -1,26 +1,56 @@
 import { useEffect, useState } from "react"
-import * as duckdb from "@duckdb/duckdb-wasm"
+import type * as duckdb from "@duckdb/duckdb-wasm"
 import { isFullMode } from "../lib/browser-support"
+
+// Only the `eh` bundle is shipped. The `mvp` fallback would add another 39 MB of
+// wasm to every deploy for browsers that fail `isFullMode()`'s exception-handling
+// check anyway (see src/lib/browser-support.ts).
 import eh_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url"
-import mvp_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url"
-import duckdb_wasm_eh from "@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url"
-import duckdb_wasm from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url"
 
-const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
-	mvp: {
-		mainModule: duckdb_wasm,
-		mainWorker: mvp_worker,
-	},
-	eh: {
-		mainModule: duckdb_wasm_eh,
-		mainWorker: eh_worker,
-	},
-}
+/**
+ * Where the DuckDB module lives.
+ *
+ * It cannot be a normal `?url` asset: the raw module is 32.7 MiB and Cloudflare
+ * rejects any single static asset over 25 MiB. It also cannot be shipped
+ * gzipped with `Content-Encoding: gzip` in `_headers` — the asset layer
+ * compresses the stored bytes again, so the browser receives gzip inside gzip
+ * and `instantiateStreaming` fails. The Worker serves it from R2 instead
+ * (worker/index.ts → handleDuckdbWasm). Locally the Vite dev server serves the
+ * same path from public/duckdb/.
+ */
+const DUCKDB_WASM_URL = "/duckdb/duckdb-eh.wasm"
 
-// Singleton DuckDB client (runs on main thread, DuckDB manages its own worker internally)
+/**
+ * DuckDB-wasm is loaded on demand only.
+ *
+ * Everything here reaches the rest of the app through the structurally-typed
+ * `DuckDBClient`, so the library itself can stay out of the initial bundle:
+ * a visitor who only opens a PBF file never pays for the SQL engine. Between
+ * them the eh/mvp wasm modules are ~73 MB of deployable assets, fetched only
+ * when an AI-query or speed-map panel actually initialises the engine.
+ */
+type DuckDBModule = typeof import("@duckdb/duckdb-wasm")
+
 let _db: duckdb.AsyncDuckDB | null = null
 let _conn: duckdb.AsyncDuckDBConnection | null = null
-let _initPromise: Promise<DuckDBClient> | null = null
+let _initPromise: Promise<DuckDBClient | null> | null = null
+
+/**
+ * The DuckDB bundle this app runs.
+ *
+ * `selectBundle()` is deliberately not used. It would only ever land here — we
+ * gate on `WebAssembly.Exception` support in isFullMode() — while forcing an
+ * `mvp` entry into the bundles object that we would then have to ship. Naming
+ * the bundle directly keeps the deploy to one wasm module.
+ *
+ * The `eh` module is single-threaded, so DuckDB does not need SharedArrayBuffer;
+ * COOP/COEP is still required for the transferable ReadableStream used when
+ * streaming large PBF files into the worker.
+ */
+const DUCKDB_BUNDLE: { mainModule: string; mainWorker: string } = {
+	mainModule: DUCKDB_WASM_URL,
+	mainWorker: eh_worker,
+}
 
 export interface DuckDBClient {
 	loadSpeedmapCSV(buffer: ArrayBuffer, fileName: string): Promise<void>
@@ -170,11 +200,13 @@ async function initDuckDB(): Promise<DuckDBClient | null> {
 	if (_initPromise) return _initPromise
 
 	_initPromise = (async () => {
-		const bundle = await duckdb.selectBundle(MANUAL_BUNDLES)
-		const worker = new Worker(bundle.mainWorker!)
-		const logger = new duckdb.ConsoleLogger()
-		_db = new duckdb.AsyncDuckDB(logger, worker)
-		await _db.instantiate(bundle.mainModule, bundle.pthreadWorker)
+		// Deferred until a panel that needs SQL is actually opened.
+		const duckdbModule: DuckDBModule = await import("@duckdb/duckdb-wasm")
+
+		const worker = new Worker(DUCKDB_BUNDLE.mainWorker)
+		const logger = new duckdbModule.ConsoleLogger()
+		_db = new duckdbModule.AsyncDuckDB(logger, worker)
+		await _db.instantiate(DUCKDB_BUNDLE.mainModule)
 		_conn = await _db.connect()
 		return client
 	})()

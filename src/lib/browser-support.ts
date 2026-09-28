@@ -8,6 +8,14 @@ export interface BrowserCapabilities {
 	webWorkers: boolean
 	serviceWorkers: boolean
 	wasm: boolean
+	/**
+	 * WebAssembly exception handling.
+	 *
+	 * We only ship DuckDB-wasm's `eh` bundle. The `mvp` fallback is another
+	 * 39 MB of wasm in every deploy for browsers that cannot run the rest of
+	 * the app anyway, so its absence is treated as "no SQL engine" instead.
+	 */
+	wasmExceptionHandling: boolean
 }
 
 export interface BrowserSupport {
@@ -26,6 +34,9 @@ export function detectCapabilities(): BrowserCapabilities {
 		webWorkers: typeof Worker !== "undefined",
 		serviceWorkers: "serviceWorker" in navigator,
 		wasm: typeof WebAssembly === "object" && typeof WebAssembly.instantiate === "function",
+		wasmExceptionHandling:
+			typeof WebAssembly === "object" &&
+			typeof (WebAssembly as { Exception?: unknown }).Exception === "function",
 	}
 }
 
@@ -55,6 +66,18 @@ export function checkBrowserSupport(): BrowserSupport {
 			fullySupported: false,
 			partiallySupported: true,
 			missingFeatures: ["SharedArrayBuffer (SQL features limited)"],
+			mode: "limited",
+		}
+	}
+
+	// Only DuckDB-wasm's `eh` bundle is shipped; without wasm exception handling
+	// the SQL engine cannot start, so report limited mode rather than failing at
+	// engine-init time.
+	if (!caps.wasmExceptionHandling) {
+		return {
+			fullySupported: false,
+			partiallySupported: true,
+			missingFeatures: ["WebAssembly exception handling (SQL features limited)"],
 			mode: "limited",
 		}
 	}

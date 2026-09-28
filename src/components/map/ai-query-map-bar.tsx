@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { AIQueryComposer } from '@/components/ai-query/ai-query-composer'
 import { useAIQuery } from '@/hooks/use-ai-query'
+import { isOsmBackedFormat, OSM_BACKED_FORMAT_LABEL } from '@/lib/format-converter'
 import { useIsMobile } from '@/hooks/use-media-query'
 import { useOsmStore } from '@/stores/osm-store'
 import { SUGGESTION_QUERIES, useAIQueryStore } from '@/stores/ai-query-store'
@@ -28,7 +29,7 @@ export function AIQueryMapBar() {
 		syncStatusMessage,
 	} = useAIQuery()
 
-	const isOsmFormat = !dataset?.format || dataset.format === 'pbf' || dataset.format === 'osm'
+	const isOsmFormat = isOsmBackedFormat(dataset?.format)
 	const canQuery = isDataReady && isOsmFormat && !isSyncing
 	const exampleQueries = useMemo(() => getExampleQueries(queryHistory), [queryHistory])
 
@@ -45,11 +46,11 @@ export function AIQueryMapBar() {
 
 	const statusLabel = useMemo(() => {
 		if (!dataset) {
-			return 'Load an OSM dataset (.pbf or .osm) to unlock AI road queries'
+			return `Load an OSM dataset (${OSM_BACKED_FORMAT_LABEL}) to unlock AI road queries`
 		}
 
 		if (!isOsmFormat) {
-			return `AI Query currently supports OSM datasets only. Loaded format: ${dataset.format.toUpperCase()}`
+			return `AI Query supports OSM-backed datasets only (${OSM_BACKED_FORMAT_LABEL}). Loaded format: ${dataset.format.toUpperCase()}`
 		}
 
 		if (isSyncing) {

@@ -1,22 +1,22 @@
 // AI Query Hook - Main logic for AI-powered queries
 import { useState, useCallback } from 'react'
-import { useAIQueryStore, type QueryResults } from '@/stores/ai-query-store'
-import { naturalLanguageToSQL } from '@/services/ai/vertex-ai'
+import { useAIQueryStore, type QueryMessage, type QueryResults, type QueryStatus } from '@/stores/ai-query-store'
+import { naturalLanguageToSQL } from '@/services/ai/edge-ai'
 import { useDuckDB } from './use-duckdb'
 import { useOsmDuckDBSync } from './use-osm-duckdb-sync'
 import { useAIMapHighlight } from './use-ai-map-highlight'
-import { detectQueryIntent, mapRoadType } from '@/services/ai/prompt-builder'
+import { detectQueryIntent } from '@/services/ai/prompt-builder'
 import { getOsmRemote } from './use-osm'
+import { isOsmBackedFormat, OSM_BACKED_FORMAT_LABEL } from '@/lib/format-converter'
 import { useOsmStore } from '@/stores/osm-store'
 import type { QueryFilter } from '@/workers/query-processor'
 
 export interface UseAIQueryReturn {
 	// State
-	isOpen: boolean
 	isLoading: boolean
-	status: 'idle' | 'generating' | 'executing' | 'completed' | 'error'
+	status: QueryStatus
 	currentSQL: string | null
-	messages: import('@/stores/ai-query-store').QueryMessage[]
+	messages: QueryMessage[]
 
 	// Data availability
 	isDataReady: boolean
@@ -51,7 +51,7 @@ function detectQueryType(sql: string): 'count' | 'aggregate' | 'select' | 'group
 // Extract highway type from SQL for user-friendly messages
 function extractRoadType(sql: string): string | null {
 	const match = sql.match(/highway\s*=\s*['"]([^'"]+)['"]/i)
-	return match ? (match[1] ?? null) : null
+	return match?.[1] ?? null
 }
 
 // Detect if a query is in Indonesian
@@ -104,7 +104,7 @@ function formatResultMessage(queryType: 'count' | 'aggregate' | 'select' | 'grou
 		const row = results.sampleData?.[0] as Record<string, number> | undefined
 		let count = 0
 		if (row) {
-			count = row.total ?? row.count ?? row.count_star?.() ?? Object.values(row)[0] ?? 0
+			count = row.total ?? row.count ?? row['count_star()'] ?? Object.values(row)[0] ?? 0
 		}
 		if (lang === 'id') {
 			return count === 0 ? `Tidak ditemukan ${roadType}.` : `Ditemukan ${count} ${roadType}.`
@@ -207,11 +207,13 @@ export function useAIQuery(): UseAIQueryReturn {
 				}
 
 				const datasetFormat = useOsmStore.getState().dataset?.format
-				if (datasetFormat && datasetFormat !== 'pbf' && datasetFormat !== 'osm') {
+				if (!isOsmBackedFormat(datasetFormat)) {
 					return {
 						rowCount: 0,
 						executionTime: 0,
-						error: 'AI queries are only available for OSM data (.pbf or .osm). This dataset uses ' + datasetFormat.toUpperCase() + ' format.',
+						error:
+							`AI queries need an OSM-backed dataset (${OSM_BACKED_FORMAT_LABEL}). ` +
+							`This dataset uses ${datasetFormat?.toUpperCase()} format.`,
 					}
 				}
 
@@ -332,7 +334,6 @@ export function useAIQuery(): UseAIQueryReturn {
 	}, [store, clearHighlight])
 
 	return {
-		isOpen: store.isOpen,
 		isLoading: store.status === 'generating' || store.status === 'executing',
 		status: store.status,
 		currentSQL: store.currentSQL,

@@ -24,9 +24,6 @@ export function CursorCoordinates() {
 			if (rafId) cancelAnimationFrame(rafId)
 			
 			rafId = requestAnimationFrame(() => {
-				// Convert screen pixel to lat/lon
-				const point = { x: e.clientX, y: e.clientY }
-				
 				// Get map container bounds untuk calculate relative position
 				const canvas = map.getCanvas()
 				const rect = canvas.getBoundingClientRect()

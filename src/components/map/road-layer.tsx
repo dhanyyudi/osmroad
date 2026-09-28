@@ -12,6 +12,7 @@ import { VECTOR_MAX_ZOOM } from "../../constants"
 import { useUIStore } from "../../stores/ui-store"
 import { useOsmStore } from "../../stores/osm-store"
 import { useSpeedStore } from "../../stores/speed-store"
+import { isOsmBackedFormat } from "../../lib/format-converter"
 import {
 	roadColorExpression,
 	roadCasingColorExpression,
@@ -197,9 +198,11 @@ export function RoadLayer({ osmId }: RoadLayerProps) {
 	const dataset = useOsmStore((s) => s.dataset)
 	const highlightedWayIds = useOsmStore((s) => s.highlightedWayIds)
 
-	// OSM-native formats get full highway classification styling;
-	// other formats (gpx, kml, shp, etc.) get a generic neutral style
-	const isOsmFormat = !dataset?.format || dataset.format === "pbf" || dataset.format === "osm"
+	// OSM-backed formats get full highway classification styling; formats parsed
+	// down to plain GeoJSON (gpx, kml, shp, …) get a generic neutral style.
+	// GeoParquet is OSM-backed: its ways carry the same `highway` tags as the
+	// source PBF, so it must not fall into the neutral branch.
+	const isOsmFormat = isOsmBackedFormat(dataset?.format)
 	const speedLoaded = useSpeedStore((s) => s.isLoaded)
 	const speedStats = useSpeedStore((s) => s.stats)
 	const speedData = useSpeedStore((s) => s.speedData)

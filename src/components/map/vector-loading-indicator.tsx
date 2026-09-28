@@ -71,11 +71,9 @@ export function VectorLoadingIndicator() {
 			if (e.sourceId === sourceId && e.tile) {
 				const tileKey = `${e.tile.z}/${e.tile.x}/${e.tile.y}`
 				
-				if (e.dataType === "tile") {
-					// Tile data is being loaded/generated
-					loadingTiles.current.add(tileKey)
-					updateProgress()
-				} else if (e.dataType === "source" && e.sourceDataType === "content") {
+				// A per-tile `sourcedata` event always has dataType "source"; the
+				// ready signal is carried by sourceDataType.
+				if (e.sourceDataType === "content") {
 					// Tile is ready
 					loadedTiles.current.add(tileKey)
 					loadingTiles.current.delete(tileKey)

@@ -1,0 +1,48 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "osmroad",
+	"main": "./worker/index.ts",
+	"compatibility_date": "2026-09-26",
+	"compatibility_flags": ["nodejs_compat"],
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/api/*", "/samples/*", "/duckdb/*"]
+	},
+	"ai": {
+		"binding": "AI"
+	},
+	// Holds the sample extracts (/samples/*) and the pre-compressed DuckDB wasm
+	// (/duckdb/*). Neither can be a static asset: Cloudflare caps one at 25 MiB
+	// and the DuckDB module is 32.7 MiB raw.
+	"r2_buckets": [
+		{
+			"binding": "STORAGE",
+			"bucket_name": "osmroad-samples"
+		}
+	],
+	// AI query backend.
+	//
+	// AI_API_KEY is a SECRET (SumoPod key), set with:
+	//     npx wrangler secret put AI_API_KEY
+	// It is deliberately absent from this file. While it is unset the endpoint
+	// falls back to the Workers AI binding below, so the feature keeps working.
+	//
+	// AI_MODEL is the SumoPod model id (OpenAI-compatible). AI_FALLBACK_MODEL is
+	// the Workers AI model, used when SumoPod is unconfigured or fails.
+	"vars": {
+		"AI_BASE_URL": "https://ai.sumopod.com/v1",
+		"AI_MODEL": "deepseek-v4-flash-0731:netra",
+		"AI_FALLBACK_MODEL": "@cf/qwen/qwen2.5-coder-32b-instruct",
+		// Requests to /api/ai/query must carry one of these origins. Empty
+		// disables the check. See originAllowed() in worker/index.ts — this stops
+		// a random web page from spending the provider budget; it is not a
+		// security boundary, since a non-browser client can forge Origin.
+		"ALLOWED_ORIGINS": "https://osmroad.gislabs.workers.dev,http://localhost:8787,http://localhost:5173"
+	},
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	}
+}
