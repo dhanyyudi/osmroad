@@ -7,6 +7,7 @@ import { useOsmDuckDBSync } from './use-osm-duckdb-sync'
 import { useAIMapHighlight } from './use-ai-map-highlight'
 import { detectQueryIntent } from '@/services/ai/prompt-builder'
 import { getOsmRemote } from './use-osm'
+import { isOsmBackedFormat, OSM_BACKED_FORMAT_LABEL } from '@/lib/format-converter'
 import { useOsmStore } from '@/stores/osm-store'
 import type { QueryFilter } from '@/workers/query-processor'
 
@@ -206,11 +207,13 @@ export function useAIQuery(): UseAIQueryReturn {
 				}
 
 				const datasetFormat = useOsmStore.getState().dataset?.format
-				if (datasetFormat && datasetFormat !== 'pbf' && datasetFormat !== 'osm') {
+				if (!isOsmBackedFormat(datasetFormat)) {
 					return {
 						rowCount: 0,
 						executionTime: 0,
-						error: 'AI queries are only available for OSM data (.pbf or .osm). This dataset uses ' + datasetFormat.toUpperCase() + ' format.',
+						error:
+							`AI queries need an OSM-backed dataset (${OSM_BACKED_FORMAT_LABEL}). ` +
+							`This dataset uses ${datasetFormat?.toUpperCase()} format.`,
 					}
 				}
 

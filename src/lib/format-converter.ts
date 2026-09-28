@@ -34,6 +34,32 @@ export function detectFormat(file: File): FileFormat {
 	return "unknown"
 }
 
+/**
+ * Formats that load into a full OSM index, with entity tags intact.
+ *
+ * `parquet` belongs here. `@osmix/geoparquet` maps each LineString to a way and
+ * keeps its tags, so a GeoParquet tile carries exactly the same `highway`
+ * properties as the tile built from the source PBF — verified by decoding both.
+ * Everything it feeds therefore works unchanged: highway classification, the AI
+ * query roads table, and the roads-only export.
+ *
+ * The remaining formats are parsed down to plain GeoJSON, which has geometry and
+ * properties but no OSM entity model, so OSM-aware features must not claim them.
+ *
+ * This is a single definition on purpose: the same `format === "pbf" || format
+ * === "osm"` comparison had been copy-pasted into five places, and every one of
+ * them silently excluded GeoParquet.
+ */
+const OSM_BACKED_FORMATS: ReadonlySet<FileFormat> = new Set<FileFormat>(["pbf", "osm", "parquet"])
+
+/** A dataset with no recorded format is treated as OSM-backed (legacy datasets). */
+export function isOsmBackedFormat(format: FileFormat | undefined): boolean {
+	return format === undefined || OSM_BACKED_FORMATS.has(format)
+}
+
+/** Human-readable list for messages, kept in step with OSM_BACKED_FORMATS. */
+export const OSM_BACKED_FORMAT_LABEL = ".pbf, .osm and .geoparquet"
+
 export async function convertToGeoJSON(
 	file: File,
 	format: FileFormat,

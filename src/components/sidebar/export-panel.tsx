@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react"
 import { useOsmStore } from "../../stores/osm-store"
 import { useOsm } from "../../hooks/use-osm"
+import { isOsmBackedFormat, OSM_BACKED_FORMAT_LABEL } from "../../lib/format-converter"
 import { Download, FileText, Route, Loader2, Check, Table2, Info } from "lucide-react"
 
 type ExportState = "idle" | "exporting" | "done" | "error"
@@ -116,7 +117,9 @@ export function ExportPanel() {
 		)
 	}
 
-	const isPbfSource = !dataset.format || dataset.format === "pbf" || dataset.format === "osm"
+	// Roads-only export rebuilds an Osm from the highway ways and writes PBF, so
+	// it works for any OSM-backed dataset, GeoParquet included.
+	const canExportRoads = isOsmBackedFormat(dataset.format)
 
 	return (
 		<div className="flex flex-col gap-4 p-4">
@@ -148,8 +151,8 @@ export function ExportPanel() {
 				</button>
 			</div>
 
-			{/* Roads-only export — only for OSM-native formats */}
-			{isPbfSource ? (
+			{/* Roads-only export — any OSM-backed dataset */}
+			{canExportRoads ? (
 				<div className="rounded-lg bg-zinc-800/50 p-3 space-y-2">
 					<div className="flex items-center gap-2">
 						<Route className="h-4 w-4 text-green-400" />
@@ -193,7 +196,7 @@ export function ExportPanel() {
 				</div>
 			) : (
 				<p className="text-[10px] text-zinc-600 text-center px-2">
-					Roads-only export is available for .pbf and .osm datasets.
+					Roads-only export needs an OSM-backed dataset ({OSM_BACKED_FORMAT_LABEL}).
 				</p>
 			)}
 
