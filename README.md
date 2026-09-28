@@ -232,6 +232,21 @@ Without that secret the endpoint falls back to the Workers AI binding, so the fe
 
 Everything ships as one Cloudflare Worker: the Worker script handles `/api/*`, `/samples/*` and `/duckdb/*`, and everything else is served from the Vite build in `./dist` by the static-asset layer.
 
+### Automatic (Cloudflare Workers Builds)
+
+The repository is connected to this Worker through **Cloudflare Workers Builds**, so **every push to `main` builds and deploys automatically**. Cloudflare holds the deploy credential itself — there is no API token in this repository or in GitHub secrets.
+
+| Setting | Value |
+|---------|-------|
+| Branch | `main` |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Root directory | `/` |
+
+`wrangler deploy` updates code and assets only; Worker secrets such as `AI_API_KEY` are preserved across deploys.
+
+### Manual
+
 ```bash
 npm run cf-typegen      # regenerate binding types after editing wrangler.jsonc
 npm run build           # → ./dist (~3 MB)
@@ -253,7 +268,10 @@ Bindings (see `wrangler.jsonc`):
 | `AI` | Workers AI | NL2SQL fallback backend |
 | `AI_API_KEY` | Worker secret | SumoPod key (optional; unset = Workers AI only) |
 
-CI: `.github/workflows/deploy.yml` typechecks and builds on every PR, and deploys on push to `main` using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+### CI
+
+`.github/workflows/ci.yml` runs on every pull request and push to `main`, and does two things a Workers Builds deploy does not: `npm run typecheck` (plus a build) and a gitleaks secret scan. It deliberately has **no deploy job** — two pipelines able to publish the same Worker would only race each other.
+
 
 ---
 
